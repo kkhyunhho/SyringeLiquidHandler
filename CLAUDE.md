@@ -22,36 +22,38 @@ The folder may be renamed/moved as long as it stays **one level under the
 workspace root** (the bootstrap resolves paths from
 `Path(__file__).resolve().parents[1]`).
 
-## Authority / conventions
+## Conventions
 
-This folder inherits the conventions of the two sibling repos it builds on:
+For shared conventions — code style, the `elec` env, testing, terminology
+(**Level** = control-code depth; **Phase** = SDL hardware stage;
+composition = device → **cell** → Phase-system), and task/commit rules —
+see **CommonClaude** (`kkhyunhho/CommonClaude`), the single source of truth.
 
-- [`SyringePumpController/CLAUDE.md`](../SyringePumpController/CLAUDE.md)
-  (which subordinates to upstream `coport-uni/CommonClaude`)
-- [`PrecisionScaleController/CLAUDE.md`](../PrecisionScaleController/PrecisionScaleController/CLAUDE.md)
-  (the canonical MIT-Python ruleset, §1–§17)
-
-When this file is silent, follow those. Folder-specific rules below
-specialize — they do not override the shared coding/commit/lint rules.
+This folder is a **cell**: it composes the pump (`sy01b`) and balance
+(`entris_ii`) drivers — both `pip install -e`'d into `elec` — into a
+gravimetric liquid-handling measurement, with an optional XZ motion stage.
+Where this file is silent, CommonClaude governs.
 
 ## Files
 
 | Path | Purpose |
 |---|---|
-| `cv_mass_measurement.py` | Gravimetric accuracy + precision (CV) of pump dispense volumes; writes a timestamped `.xlsx`. |
+| `cv_mass_measurement.py` | Gravimetric accuracy + precision (CV) of pump dispense volumes; writes a timestamped `.xlsx`. Optionally homes the XZ frame first. |
+| `xz_stage.py` | XZ gantry bring-up (MKS SERVO57D motors): home + move to the measurement position. |
 | `README.md` | User-facing usage, configuration, workbook layout. |
-| `requirements.txt` | `pyserial`, `openpyxl` (the two drivers load via `sys.path`, not pip). |
+| `requirements.txt` | `openpyxl` (+ `ftd2xx` for the standalone XZ motor). Pump/balance drivers come from the `elec` env, not `sys.path`. |
 | `LearnedPatterns.md` | Running log of gotchas (see below). |
 | `example_cv_mass_measurement_tip30G.xlsx` | Sample output (fake data). |
 
-## Environment
-
-- **Default conda env: `slh`** (Python 3.12 — meets sy01b's `>=3.12`
-  floor). `conda activate slh`, then `pip install -r requirements.txt`.
-- **VIRTUAL_ENV leak:** a stale `VIRTUAL_ENV=/workspace/AutomatedPipette/.venv`
-  can shadow `python`/`pip` even inside `slh`. Always check
-  `which python` resolves to `/opt/conda/envs/slh/bin/python`; if not,
-  `deactivate` first.
+- **Shared conda env `elec`** (Python 3.12); new terminals activate it.
+  The pump (`sy01b`) and balance (`entris_ii`) drivers are `pip install -e`'d
+  into `elec`, so [`cv_mass_measurement.py`](cv_mass_measurement.py) imports
+  them directly — no `sys.path` bootstrap.
+- **XZ stage motor:** [`xz_stage.py`](xz_stage.py) uses the
+  **MKSServo57DCANController standalone** MKS driver (`ftd2xx`-based), which
+  is *not* installed in `elec` (its import name `mks_motor` collides with
+  the full ESP32 driver). It is added to `sys.path` from that repo's `src/`.
+  `ftd2xx` is installed in `elec`.
 - Runs in a Docker container; the container's `/dev` is a private tmpfs, so
   USB device nodes can go stale after re-enumeration / a Docker restart.
 
@@ -59,13 +61,12 @@ specialize — they do not override the shared coding/commit/lint rules.
 
 | Purpose | Command |
 |---|---|
-| Run a measurement | `conda activate slh && python cv_mass_measurement.py` |
-| Lint (if `ruff` installed) | `ruff check cv_mass_measurement.py` |
+| Run a measurement | `conda activate elec && python cv_mass_measurement.py` |
+| Lint | `ruff check cv_mass_measurement.py` |
 | Format check | `ruff format --check cv_mass_measurement.py` |
 | List serial ports | `python -m serial.tools.list_ports -v` |
 
-`ruff` is not always on PATH in this env; install with `pip install ruff`
-into `slh` if needed. New code must still satisfy the shared Python style
+New code must still satisfy the shared Python style
 (80-col, 4-space, `snake_case`, Google-style docstrings, no magic numbers).
 
 ## Hardware & ports (this bench)
@@ -79,8 +80,9 @@ balance can also auto-detect by the Sartorius vendor ID.
 |---|---|---|
 | Balance (Entris-II BCE224I) | `24BC:0010` | USB-C, Sartorius CDC → `ttyACM*`; `SCALE_PORT = None` auto-detects it. Must be passed into the container (`lsusb` shows `24bc:0010`). |
 | Pump (SY-01B) | `1A86:7523` | CH340 USB-serial → `ttyUSB*`; `PUMP_PORT = "1A86:7523"`. |
+| XZ motors (3× MKS SERVO57D) | `0403:6001` | FTDI USB2CAN adapters, addressed by **serial**: X = `NTAM63XD`, the other two (`A10PUO5V`, `A10PUO5W`) are the paired Z. Driven via D2XX (`ftd2xx`), see `xz_stage.py`. |
 | Moxa UPort 1150 | `110A:1150` | A **different** instrument — NOT the balance. |
-| Motors (other project) | `0403:6001`, `303A:1001` | FTDI USB2CAN + ESP32; unrelated. |
+| ESP32-S3 | `303A:1001` | Other project; unrelated. |
 
 ### Valve port gotcha (critical)
 
@@ -122,6 +124,17 @@ interface menu. SBI serial defaults: 9600 / ODD / 8 / 1.
    `read_settled_weight` (wait for N consecutive in-tolerance readings), not
    a single auto-pushed value, which can fire before the liquid settles
    (LearnedPatterns #2).
+
+5. **XZ stage is the highest-stakes subsystem.** `xz_stage.py` moves a
+   physical gantry. The MKS driver (MKSServo57DCANController) has **no
+   paired-Z desync interlock** (unlike the ESP32 variant), so a mid-move
+   comms fault on one Z can rack the gantry. Always: test standalone
+   (`python xz_stage.py`) with the frame clear before the full run; verify
+   `MOVE_ORDER` is collision-free for the geometry; never auto-run the
+   motors from a tool without the operator ready. D2XX (`ftd2xx`) needs
+   `ftdi_sio` unbound first — `xz_stage.release_ftdi_sio()` does that; it
+   only touches FTDI adapters, so the CH340 pump and CDC balance are
+   unaffected.
 
 ## Research before coding
 

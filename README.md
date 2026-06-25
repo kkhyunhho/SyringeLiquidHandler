@@ -2,27 +2,30 @@
 
 Cross-project bench scripts that drive the **Runze SY-01B syringe pump**
 and the **Sartorius Entris-II balance** together for liquid-handling
-measurements. The scripts import the two device controllers directly from
-their sibling project repos (no install needed):
+measurements. The pump (`sy01b`) and balance (`entris_ii`) drivers are
+`pip install -e`'d into the shared conda env **`elec`**, so
+[`cv_mass_measurement.py`](cv_mass_measurement.py) imports them directly —
+no `sys.path` bootstrap.
 
-- `../PrecisionScaleController/PrecisionScaleController/src` → `entris_ii`
-- `../SyringePumpController/src` → `sy01b`
-
-Both `src/` paths are added to `sys.path` at the top of each script, so the
-folder can be renamed/moved as long as it stays one level under the
-workspace root.
+The optional XZ stage ([`xz_stage.py`](xz_stage.py)) uses the
+MKSServo57DCANController **standalone** MKS driver, which is not in `elec`
+(its `mks_motor` import name collides with the full ESP32 driver); that one
+is added to `sys.path` from `../MKSServo57DCANController/src`.
 
 ## Scripts
 
 | File | Purpose |
 |---|---|
-| `cv_mass_measurement.py` | Gravimetric accuracy + precision (CV) of pump dispense volumes (5/50/100 µL × 5 reps), written to a timestamped `.xlsx`. |
+| `cv_mass_measurement.py` | Gravimetric accuracy + precision (CV) of pump dispense volumes (5/50/100 µL × 5 reps), written to a timestamped `.xlsx`. Optionally homes + positions the XZ frame first. |
+| `xz_stage.py` | Brings the XZ gantry (MKS SERVO57D motors) up: home + move to the measurement position. Used by `cv_mass_measurement.py`; also runnable standalone. |
 
 ## `cv_mass_measurement.py`
 
 Measures how repeatably the pump dispenses small water volumes, weighing
 each dispense on the balance:
 
+0. If `MOTOR_STAGE_ENABLE`, home the XZ gantry and move it to the
+   measurement position (`xz_stage.home_and_position()`) — see below.
 1. Place **one empty vial** on the pan (once, at the prompt).
 2. The pump primes (`PRIME_CYCLES` full-stroke cycles) to fill the line and
    purge air, then `MEASUREMENT_PLAN` drives two nested loops — the **outer**
@@ -84,6 +87,7 @@ Edit the constants near the top of the script. Defaults:
 | `PRIME_CYCLES` / `PRIME_VOLUME_UL` | `2` / `125` | Pre-run full-stroke priming cycles |
 | `SYRINGE_TIP_GAUGE` | `"30"` | Blunt-tip needle bore gauge (G); logged + in filename |
 | `MEASUREMENT_PLAN` | `[(5,5),(50,5),(100,5)]` | `(target µL, replicates)` per volume |
+| `BALANCE_AMBIENT` | `"very_unstable"` | Stability filter set over SBI (Esc K/L/M/N); looser = settles in a noisy env. `None` leaves the panel setting |
 | `TARE_TOLERANCE_G` | `0.002` | Net weight still accepted as "zeroed" |
 | `DISPENSE_SETTLE_S` | `3.0` | Initial grace pause after a dispense |
 | `SETTLE_TOLERANCE_G` / `SETTLE_AGREEMENT_READS` | `0.001` / `3` | Settling: max spread / consecutive reads that must agree |
@@ -103,32 +107,53 @@ to set the trial count per volume (they may differ). E.g.
 
 The balance must be in SBI mode with stable-weight auto-push, set on the
 front panel before running (see the `PrecisionScaleController` module
-docstring for details):
+docstring for details). The ambient filter is set from code at startup
+(`BALANCE_AMBIENT`), so only these two are menu-only:
 
 - `STAB.RNG = V.FAST`
 - `COM.OUTP = AUTO W/`
 
 USB-C SBI defaults: 9600 baud, odd parity, 8 data bits, 1 stop bit.
 
+### XZ stage (`xz_stage.py`)
+
+Drives the XZ gantry's three MKS SERVO57D motors (one X + paired Z_A/Z_B)
+via the `MKSServo57DCANController` driver over the FTDI USB2CAN adapters
+(D2XX). On `home_and_position()` it: unbinds the kernel `ftdi_sio` driver
+(so D2XX can claim the adapters), resolves each adapter by FTDI serial
+(`SERIAL_X` is X, the other two are the synced Z), sets up, homes Z (paired,
+parallel) then X, and moves to `(X_TARGET_MM, Z_TARGET_MM)` in `MOVE_ORDER`.
+
+Config lives at the top of `xz_stage.py`: `SERIAL_X` (default `"NTAM63XD"`),
+`X_TARGET_MM` (`261.5`), `Z_TARGET_MM` (`234.0`), `HOMING_SPEED_RPM`,
+`MOVE_SPEED_PCT` / `MOVE_ACCEL_PCT`, `MOVE_ORDER`. List adapter serials with
+`python -c "import ftd2xx; print(ftd2xx.listDevices())"`.
+
+> ⚠️ **Moves a physical gantry.** Clear the frame and confirm the target +
+> path are collision-free first. Verify `MOVE_ORDER` for your geometry. The
+> paired Z motors have no desync interlock in this driver — keep an e-stop
+> handy on first runs. Test it standalone before the full run:
+> `python xz_stage.py`.
+
 ### Dependencies
 
-Python ≥ 3.12 (sy01b's floor), plus the packages in
-[`requirements.txt`](requirements.txt). The default env is the conda env
-`slh`:
+Python ≥ 3.12, in the shared conda env **`elec`** (new terminals activate
+it). The pump and balance drivers are `pip install -e`'d into `elec`, so
+this cell only needs its own extras:
 
 ```bash
-conda activate slh
-pip install -r requirements.txt
+conda activate elec
+pip install -r requirements.txt   # openpyxl (+ ftd2xx for the XZ stage)
 ```
 
-> If `which python` points at `/workspace/AutomatedPipette/.venv/...` after
-> activating, a stale `VIRTUAL_ENV` is shadowing it — run `deactivate` then
-> `conda activate slh`.
+`ftd2xx` (for `xz_stage.py`) is a ctypes wrapper that also needs FTDI's
+system **D2XX library** (`libftd2xx`) installed. If you don't use the XZ
+stage, set `MOTOR_STAGE_ENABLE = False` and `ftd2xx` is never imported.
 
 ### Run
 
 ```bash
-conda activate slh
+conda activate elec
 python cv_mass_measurement.py
 ```
 

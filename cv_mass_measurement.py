@@ -53,21 +53,12 @@ from pathlib import Path
 
 import serial.tools.list_ports
 
-# Both controllers live in sibling project repos with a src/ layout and
-# no installed package, so their src/ directories are added to sys.path
-# the same way each project's own main.py does it.
-_WORKSPACE_ROOT = Path(__file__).resolve().parents[1]
-_SCALE_SRC = (
-    _WORKSPACE_ROOT / "PrecisionScaleController" / "PrecisionScaleController" / "src"
-)
-_PUMP_SRC = _WORKSPACE_ROOT / "SyringePumpController" / "src"
-sys.path.insert(0, str(_SCALE_SRC))
-sys.path.insert(0, str(_PUMP_SRC))
-
-from entris_ii import PrecisionScaleController  # noqa: E402
-from openpyxl import Workbook  # noqa: E402
-from openpyxl.styles import PatternFill  # noqa: E402
-from sy01b import SyringePumpController  # noqa: E402
+# The pump and balance drivers are installed (pip install -e) into the
+# shared conda env `elec`, so they import directly — no sys.path bootstrap.
+from entris_ii import PrecisionScaleController
+from openpyxl import Workbook
+from openpyxl.styles import PatternFill
+from sy01b import SyringePumpController
 
 # ==========================================================================
 # Configuration — edit these to define a run.
@@ -93,6 +84,13 @@ from sy01b import SyringePumpController  # noqa: E402
 SCALE_PORT = None
 PUMP_PORT = "1A86:7523"
 
+# --- XZ stage -------------------------------------------------------------
+# When True, home the XZ gantry and move it to the measurement position
+# (xz_stage.home_and_position()) before measuring. The motor serials,
+# target X/Z, speeds, and move order are configured in xz_stage.py. Set
+# False to skip the frame and run balance + pump only.
+MOTOR_STAGE_ENABLE = True
+
 # --- Pump / valve ---------------------------------------------------------
 PUMP_ADDRESS = 1
 PUMP_BAUD = 9600
@@ -106,12 +104,13 @@ PUMP_INIT_FORCE = 2
 # The bench valve is a Runze M05 Bi-pass valve with only TWO fluid states
 # 90 deg apart; driven as a 4-way distribution valve, firmware ports 1 & 3
 # land on the SAME state and 2 & 4 on the other (180 deg rotor symmetry).
-# So source and sink MUST be 90 deg apart, not 180. Empirically on this
-# bench: firmware port 2 = reservoir (C-3/1-2), firmware port 1 = tip
-# (C-1/2-3). Using 3 & 1 (180 deg) silently aspirates and dispenses at the
-# same tube — see LearnedPatterns.md #1. Verify with the eye, not ?6.
-SOURCE_PORT = 2
-DISPENSE_PORT = 1
+# So source and sink MUST be 90 deg apart, not 180. Firmware port 2 selects
+# fluid state C-3/1-2 and port 1 selects C-1/2-3 (a 90 deg pair); using 3 &
+# 1 (180 deg) silently aspirates and dispenses at the same tube — see
+# LearnedPatterns.md #1. Make sure the physical tubing (reservoir vs vial
+# tip) matches this aspirate/dispense assignment; verify with the eye, not ?6.
+SOURCE_PORT = 1
+DISPENSE_PORT = 2
 
 # --- Priming --------------------------------------------------------------
 # Before measuring, run PRIME_CYCLES full aspirate/dispense cycles to fill
@@ -119,14 +118,14 @@ DISPENSE_PORT = 1
 # air, so the first real dispenses deliver nothing. Primed liquid leaves
 # through DISPENSE_PORT, so put a waste container (or a throwaway vial)
 # under the outlet for this step. Set PRIME_CYCLES = 0 to skip priming.
-PRIME_CYCLES = 2
+PRIME_CYCLES = 3
 PRIME_VOLUME_UL = 125  # full 125 uL stroke per prime cycle
 
 # --- Syringe tip ----------------------------------------------------------
 # Blunt-tip dispensing needle bore gauge (G) of the tip under test, e.g.
 # "30" is 30 gauge — higher number = finer bore. Logged into the workbook
 # and the output filename so runs with different tips can be compared.
-SYRINGE_TIP_GAUGE = "30"
+SYRINGE_TIP_GAUGE = "18"
 
 # --- Measurement plan -----------------------------------------------------
 # One entry per target volume to characterize. This drives two nested
@@ -142,12 +141,23 @@ SYRINGE_TIP_GAUGE = "30"
 # Example — 10 uL x3, 20 uL x5, 100 uL x10:
 #     MEASUREMENT_PLAN = [(10, 3), (20, 5), (100, 10)]
 MEASUREMENT_PLAN = [
-    (5, 5),
-    (50, 5),
+    # (5, 5),
+    # (50, 5),
     (100, 5),
 ]
 
 # --- Balance timing / tolerances ------------------------------------------
+# Ambient-condition filter sent to the balance over SBI at startup
+# (Esc K/L/M/N). The looser "unstable"/"very_unstable" settings make the
+# balance filter harder and declare stability more readily, which avoids
+# read_stable_weight timing out when the pan never settles (the balance
+# only streams "Stat"). Set to None to leave the front-panel setting alone.
+# Options: "very_stable", "stable", "unstable", "very_unstable".
+# NOTE: this is a tolerance for a noisy environment, not a substitute for a
+# physically steady pan — remove dispense-tube tension / drafts for best
+# accuracy. STAB.RNG (stability range) remains menu-only.
+BALANCE_AMBIENT = "very_unstable"
+
 # Net weight that still counts as a confirmed zero after taring. The
 # BCE224I reads to 0.0001 g, so 0.002 g (2 mg) is a few display counts of
 # slack for residual drift / draft.
@@ -653,6 +663,15 @@ def main() -> int:
         stream=sys.stderr,
     )
 
+    if MOTOR_STAGE_ENABLE:
+        # Home the XZ gantry and move it to the measurement position before
+        # touching the balance/pump. Imported lazily so a missing motor
+        # toolchain (ftd2xx) only matters when the stage is enabled.
+        import xz_stage
+
+        log.info("Bringing up XZ frame (home + position)...")
+        xz_stage.home_and_position()
+
     try:
         scale_port = _resolve_port(SCALE_PORT, "balance")
         if scale_port is None:
@@ -695,6 +714,11 @@ def main() -> int:
             scale.get_model_number(),
             scale.get_serial_number(),
         )
+        if BALANCE_AMBIENT is not None:
+            # Loosen the stability filter so the balance settles in a noisy
+            # environment instead of streaming "Stat" forever.
+            log.info("Setting balance ambient filter: %s", BALANCE_AMBIENT)
+            scale.set_ambient(BALANCE_AMBIENT)
 
         # Read-only safety probe before any motion (W1 rule).
         report = pump.diagnose()

@@ -1,10 +1,17 @@
-# Python dependencies for cv_mass_measurement.py.
-# Install into the active env:  pip install -r requirements.txt
-# Requires Python >= 3.12 (sy01b's floor).
+# Python dependencies for the SyringeLiquidHandler scripts.
+# Install into the shared env:  conda activate elec && pip install -r requirements.txt
+# Requires Python >= 3.12.
 #
-# The two device controllers (entris_ii, sy01b) are NOT listed here — they
-# are imported directly from the sibling project repos' src/ dirs via the
-# sys.path bootstrap at the top of cv_mass_measurement.py, not pip-installed.
+# The pump (sy01b) and balance (entris_ii) drivers are pip install -e'd into
+# the elec env and import directly — not listed here. The XZ stage uses the
+# MKSServo57DCANController standalone mks_motor via sys.path (not in elec);
+# it needs ftd2xx (below).
 
 pyserial>=3.5    # serial link to the balance (entris_ii) and pump (sy01b)
 openpyxl>=3.1.5  # .xlsx result workbook (pulls in et-xmlfile)
+
+# XZ-stage motors (xz_stage.py) talk to the MKS SERVO57D drivers over the
+# FTDI USB2CAN adapters via the D2XX API. ftd2xx is a thin ctypes wrapper
+# and also needs FTDI's system D2XX library (libftd2xx) installed, plus the
+# kernel ftdi_sio driver unbound (xz_stage.release_ftdi_sio handles that).
+ftd2xx>=1.3.8    # XZ-stage motor control (MKS SERVO57D via USB2CAN)
