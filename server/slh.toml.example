@@ -1,0 +1,22 @@
+# SyringeLiquidHandler /v1 server config. Copy to slh.toml (gitignored) and
+# edit for the bench. Ports accept a device path or a "VID:PID" hex string.
+
+[pump]
+port = "1A86:7523"   # SY-01B CH340 USB-serial (VID:PID), or e.g. "/dev/ttyUSB1"
+address = 1
+baud = 9600
+syringe_uL = 125
+init_force = 2        # 0/1/2 or 10..40 Z-init force code
+
+[balance]
+# Omit `port` to auto-detect the Sartorius balance by vendor ID 0x24BC.
+# port = "24BC:0010"
+ambient = "very_unstable"   # very_stable | stable | unstable | very_unstable
+
+[stage]
+enable = false        # true once xz_stage is migrated to the ESP32 mks_motor
+
+[server]
+host = "0.0.0.0"
+port = 17047
+log_level = "info"

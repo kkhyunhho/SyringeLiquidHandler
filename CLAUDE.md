@@ -41,6 +41,10 @@ Where this file is silent, SDLClaude governs.
 | `cv_mass_measurement.py` | Gravimetric accuracy + precision (CV) of pump dispense volumes; writes a timestamped `.xlsx`. Optionally homes the XZ frame first. |
 | `report.py` | Excel report rendering (heat-map styling + workbook writer), split out of `cv_mass_measurement.py`. |
 | `xz_stage.py` | XZ gantry bring-up (MKS SERVO57D motors): home + move to the measurement position. |
+| `server/` | FastAPI **L1 `/v1` server** — thin HTTP bridge over the cell (mirrors `sy01b-server`). See [WEB_V1_DRAFT.md](WEB_V1_DRAFT.md). |
+| `cell.py` | `Cell` protocol + `CellError` hierarchy the server maps to HTTP. |
+| `real_cell.py` | `SyringeCell` — real drivers behind `Cell` (pump/balance wired; stage `home` only, `move` pending the xz_stage→ESP32 mks_motor migration). |
+| `tests/server/` | `FakeCell` + route tests (no hardware). |
 | `README.md` | User-facing usage, configuration, workbook layout. |
 | `requirements.txt` | `openpyxl` (+ `ftd2xx` for the standalone XZ motor). Pump/balance drivers come from the `elec` env, not `sys.path`. |
 | `LearnedPatterns.md` | Running log of gotchas (see below). |
@@ -63,6 +67,8 @@ Where this file is silent, SDLClaude governs.
 | Purpose | Command |
 |---|---|
 | Run a measurement | `conda activate elec && python cv_mass_measurement.py` |
+| Run the /v1 server | `cp server/slh.toml.example server/slh.toml` then `python -m server` |
+| Test the server | `python -m pytest tests/server/` (FakeCell, no hardware) |
 | Lint | `ruff check cv_mass_measurement.py` |
 | Format check | `ruff format --check cv_mass_measurement.py` |
 | List serial ports | `python -m serial.tools.list_ports -v` |

@@ -15,3 +15,8 @@ openpyxl>=3.1.5  # .xlsx result workbook (pulls in et-xmlfile)
 # and also needs FTDI's system D2XX library (libftd2xx) installed, plus the
 # kernel ftdi_sio driver unbound (xz_stage.release_ftdi_sio handles that).
 ftd2xx>=1.3.8    # XZ-stage motor control (MKS SERVO57D via USB2CAN)
+
+# L1 /v1 server (server/ package). The web UI / ESP32 are HTTP clients.
+fastapi>=0.115        # /v1 app + pydantic schemas
+uvicorn>=0.30         # ASGI server (python -m server)
+httpx>=0.27           # required by fastapi.testclient (tests/server)
