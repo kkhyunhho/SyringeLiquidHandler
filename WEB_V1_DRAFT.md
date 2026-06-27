@@ -3,7 +3,7 @@
 Design spec for this cell's L1 server and its web front-end. API-first:
 endpoints are derived from the L0 driver capabilities (pump `sy01b`,
 balance `entris_ii`, XZ stage via the **ESP32 full `mks_motor`** driver).
-See CommonClaude/ARCHITECTURE.md for terminology (Level / Phase / cell).
+See SDLClaude/ARCHITECTURE.md for terminology (Level / Phase / cell).
 
 ## Principles
 - API-first; mirror the `sy01b-server` pattern.

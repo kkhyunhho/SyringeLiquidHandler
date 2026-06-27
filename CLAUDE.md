@@ -27,12 +27,12 @@ workspace root** (the bootstrap resolves paths from
 For shared conventions — code style, the `elec` env, testing, terminology
 (**Level** = control-code depth; **Phase** = SDL hardware stage;
 composition = device → **cell** → Phase-system), and task/commit rules —
-see **CommonClaude** (`kkhyunhho/CommonClaude`), the single source of truth.
+see **SDLClaude** (`kkhyunhho/SDLClaude`), the single source of truth.
 
 This folder is a **cell**: it composes the pump (`sy01b`) and balance
 (`entris_ii`) drivers — both `pip install -e`'d into `elec` — into a
 gravimetric liquid-handling measurement, with an optional XZ motion stage.
-Where this file is silent, CommonClaude governs.
+Where this file is silent, SDLClaude governs.
 
 ## Files
 
