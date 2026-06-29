@@ -62,7 +62,32 @@ def main(argv: list[str] | None = None) -> int:
             "otherwise ./server/slh.toml."
         ),
     )
+    parser.add_argument(
+        "--fake",
+        action="store_true",
+        help=(
+            "Run against the in-memory FakeCell instead of real hardware — "
+            "for web development and exercising the /v1 contract. Ignores "
+            "--config; serves on host/port from [server] if a config exists, "
+            "else 0.0.0.0:17047."
+        ),
+    )
     args = parser.parse_args(argv)
+
+    if args.fake:
+        from fake_cell import FakeCell
+
+        server_cfg = ServerConfig()
+        app = create_app(cell_factory=FakeCell)
+        print(f"slh-server [FAKE] on {server_cfg.host}:{server_cfg.port}")
+        uvicorn.run(
+            app,
+            host=server_cfg.host,
+            port=server_cfg.port,
+            log_level=server_cfg.log_level,
+            timeout_keep_alive=120,
+        )
+        return 0
 
     if args.config is not None:
         cfg_path = args.config
