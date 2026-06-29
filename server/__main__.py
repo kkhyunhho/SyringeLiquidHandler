@@ -23,7 +23,7 @@ from server.app import create_app
 @dataclass(frozen=True, slots=True)
 class ServerConfig:
     host: str = "0.0.0.0"
-    port: int = 17047
+    port: int = 17054
     log_level: str = "info"
 
 
@@ -45,7 +45,7 @@ def _load(path: Path) -> tuple[Config, ServerConfig]:
     )
     server_cfg = ServerConfig(
         host=server.get("host", "0.0.0.0"),
-        port=int(server.get("port", 17047)),
+        port=int(server.get("port", 17054)),
         log_level=server.get("log_level", "info"),
     )
     return cell_cfg, server_cfg
@@ -69,7 +69,7 @@ def main(argv: list[str] | None = None) -> int:
             "Run against the in-memory FakeCell instead of real hardware — "
             "for web development and exercising the /v1 contract. Ignores "
             "--config; serves on host/port from [server] if a config exists, "
-            "else 0.0.0.0:17047."
+            "else 0.0.0.0:17054."
         ),
     )
     args = parser.parse_args(argv)
