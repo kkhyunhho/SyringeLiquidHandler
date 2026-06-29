@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import {
   TriangleAlert,
@@ -63,6 +63,7 @@ import {
 } from "@/lib/constants"
 import { PlungerView, StageView, ValveDiagram } from "@/components/diagrams"
 import { Stat, StatusPill } from "@/components/widgets"
+import { api, ApiError } from "@/lib/api"
 
 
 export default function App() {
@@ -127,58 +128,125 @@ export default function App() {
       : { word: "ready", cls: "text-status-ok", fault: false }
   }
 
-  // Always-current snapshot of `live` for routines that run across awaits
-  // (scenario steps read the latest stage position, not a stale closure).
+  // Always-current snapshots for routines/poller that run across awaits
+  // (read the latest values, not a stale closure).
   const liveRef = useRef(live)
   liveRef.current = live
+  const pollGateRef = useRef(false)
+  pollGateRef.current = anyBusy || running
 
-  // Run `fn` with the named devices marked busy for its duration.
+  // Surface a server/network error to the user and the Live state. Setting
+  // live.error blocks further commands (ready=false) until a re-diagnose /
+  // setup / STOP clears it.
+  const fail = (e: unknown) => {
+    const msg =
+      e instanceof ApiError ? `${e.errorName}: ${e.message}` : String(e)
+    setLive((l) => ({ ...l, error: msg }))
+    toast.error(msg)
+  }
+
+  // Await a real /v1 call together with a minimum animation time, so the
+  // Visualization still plays against the instant FakeCell and tracks real
+  // device time on hardware (whichever is longer wins).
+  const withAnim = async <T,>(p: Promise<T>, animMs: number): Promise<T> => {
+    const [r] = await Promise.all([p, sleep(animMs)])
+    return r
+  }
+
+  // Server valve label ("1".."4"/"?") → the UI's usable Port (1 or 3).
+  const asPort = (v: string): Port => (v === "3" ? 3 : 1)
+
+  // Run `fn` with the named devices marked busy for its duration; any error
+  // is surfaced (not swallowed) and the devices freed.
   async function withBusy(devs: Dev[], fn: () => Promise<void>) {
     setBusy((b) => ({ ...b, ...Object.fromEntries(devs.map((d) => [d, true])) }))
     try {
       await fn()
+    } catch (e) {
+      fail(e)
     } finally {
       setBusy((b) => ({ ...b, ...Object.fromEntries(devs.map((d) => [d, false])) }))
     }
   }
 
+  // ── Live readout polling: keep weight/plunger/stage fresh from the server
+  //    while idle. Skips while busy/running so it never clobbers an
+  //    in-flight animation. Poll failures (server down) are ignored. ────────
+  useEffect(() => {
+    const id = setInterval(async () => {
+      if (pollGateRef.current) return
+      try {
+        const s = await api.status()
+        setLive((l) => ({
+          ...l,
+          weightG: s.weight_g,
+          plungerUL: s.plunger_uL,
+          stageXmm: s.stage_x_mm,
+          stageZmm: s.stage_z_mm,
+          valveConnect: asPort(s.valve),
+          error: s.error,
+        }))
+      } catch {
+        /* server not reachable — leave last-known values */
+      }
+    }, 2000)
+    return () => clearInterval(id)
+  }, [])
+
   const ALL_DEVS: Dev[] = ["pump", "balance", "stage"]
+
+  const applyDiagnose = (d: Awaited<ReturnType<typeof api.diagnose>>) => {
+    setConn({
+      pump: d.pump.ok ? "ok" : "fault",
+      balance: d.balance.ok ? "ok" : "fault",
+      stage: d.stage.ok ? "ok" : "fault",
+    })
+    setDiagnosed(true)
+    setLive((l) => ({ ...l, error: null }))
+  }
 
   const diagnose = () =>
     withBusy(ALL_DEVS, async () => {
       pushHist("Diagnose")
-      await sleep(400)
-      setDiagnosed(true)
-      setConn({ pump: "ok", balance: "ok", stage: "ok" })
+      applyDiagnose(await api.diagnose())
       toast.success("Diagnose OK")
     })
 
   const setupAll = () =>
     withBusy(ALL_DEVS, async () => {
       pushHist("Setup (diagnose + initialize + tare)")
-      await sleep(300)
-      setDiagnosed(true)
-      setConn({ pump: "ok", balance: "ok", stage: "ok" })
-      await sleep(300)
+      applyDiagnose(await api.diagnose())
+      const init = await api.initialize(2)
       setInitialized(true)
-      setLive((l) => ({ ...l, plungerUL: 0, weightG: 0 }))
+      const t = await api.tare()
+      setLive((l) => ({
+        ...l,
+        plungerUL: init.plunger_uL,
+        valveConnect: asPort(init.valve),
+        weightG: t.weight_g,
+        error: null,
+      }))
       toast.success("Setup complete — diagnosed, initialized, tared")
     })
 
   const initialize = () =>
     withBusy(["pump"], async () => {
       pushHist("Initialize pump")
-      await sleep(400)
+      const r = await api.initialize(2)
       setInitialized(true)
-      setLive((l) => ({ ...l, plungerUL: 0 }))
+      setLive((l) => ({
+        ...l,
+        plungerUL: r.plunger_uL,
+        valveConnect: asPort(r.valve),
+      }))
       toast.success("Pump initialized")
     })
 
   // Core operations (no busy toggle) — shared by buttons and the scenario
   // runner so both animate the Visualization identically.
   const doTare = async () => {
-    await sleep(300)
-    setLive((l) => ({ ...l, weightG: 0 }))
+    const r = await api.tare()
+    setLive((l) => ({ ...l, weightG: r.weight_g }))
     toast.success("Balance tared")
   }
   const tare = () => {
@@ -208,22 +276,25 @@ export default function App() {
       valveConnect: op.asp,
     }))
     toast.info(`Valve → Port ${op.asp} · aspirate ${v} µL (Path ${op.path})`)
-    await sleep(VALVE_MS)
+    await withAnim(api.valve(op.asp), VALVE_MS)
     setPlungerDurMs(ms)
     setLive((l) => ({ ...l, plungerUL: v }))
-    await sleep(ms)
+    await withAnim(api.aspirate(v), ms)
     setLive((l) => ({ ...l, valveConnect: op.disp }))
     toast.info(`Valve → Port ${op.disp} · dispense`)
-    await sleep(VALVE_MS)
+    await withAnim(api.valve(op.disp), VALVE_MS)
     setPlungerDurMs(ms)
     setLive((l) => ({ ...l, plungerUL: 0 }))
-    await sleep(ms)
+    await withAnim(api.dispense(0), ms)
     toast.success(`Done — ${v} µL P${op.asp}→P${op.disp}`)
   }
 
-  // Prime: full-stroke fill/empty cycles, always at max volume.
+  // Prime: full-stroke fill/empty cycles, always at max volume. The server
+  // runs the whole repeated cycle in one /pump/cycle call; the client
+  // animates n fill/empty cycles alongside it.
   const doPrime = async (op: Extract<Op, { kind: "prime" }>) => {
     const ms = plungerMs(SYRINGE_UL, op.pumpPct)
+    const serverDone = api.cycle(op.n, SYRINGE_UL, op.src, op.disp)
     for (let i = 1; i <= op.n; i++) {
       setPlungerDurMs(ms)
       setLive((l) => ({ ...l, plungerUL: SYRINGE_UL }))
@@ -233,6 +304,7 @@ export default function App() {
       await sleep(ms)
       toast.info(`Prime ${i}/${op.n} (${SYRINGE_UL} µL)`)
     }
+    await serverDone // surface any server error + wait for real completion
     toast.success(`Primed (${op.n} cycles @ ${SYRINGE_UL} µL)`)
   }
 
@@ -278,6 +350,8 @@ export default function App() {
         setLive((l) => ({ ...l, stageZmm: z })),
       ) // down
     }
+    const r = await api.stageMove(x, z, op.sPct, op.aPct)
+    setLive((l) => ({ ...l, stageXmm: r.x_mm, stageZmm: r.z_mm }))
     toast.success(`Stage → X ${x} / Z ${z} mm  (≈ ${(total / 1000).toFixed(1)} s)`)
   }
 
@@ -294,6 +368,8 @@ export default function App() {
       total += await stageSeg(curX, HOME_RPM, HOME_ACC, () =>
         setLive((l) => ({ ...l, stageXmm: 0 })),
       )
+    const r = await api.stageHome()
+    setLive((l) => ({ ...l, stageXmm: r.x_mm, stageZmm: r.z_mm }))
     toast.success(`Stage homed  (≈ ${(total / 1000).toFixed(1)} s)`)
   }
 
@@ -326,6 +402,8 @@ export default function App() {
     kind: "prime",
     n: clamp(Number(primeCycles) || 1, 1, 10),
     pumpPct: clamp(Number(pumpSpeedPct) || 0, 1, 100),
+    src: live.aspPort,
+    disp: live.dispPort,
   })
 
   const activation = () => {
@@ -352,6 +430,10 @@ export default function App() {
     setBusy({ pump: false, balance: false, stage: false })
     setRunning(false)
     pushHist("STOP (abort all motion)")
+    // Fire-and-forget the server abort; clear any latched local error so the
+    // operator can drive again after dealing with the cause.
+    api.stop().catch(() => {})
+    setLive((l) => ({ ...l, error: null }))
     toast.warning("STOP — all motion aborted")
   }
 
@@ -368,6 +450,10 @@ export default function App() {
         toast.info(`▶ ${s.label}`)
         // Mark only the device this step uses busy (e.g. a prime step → pump).
         await withBusy(stepDevs(s.op), () => runStep(s.op))
+        if (liveRef.current.error) {
+          toast.error("Scenario stopped — a step failed")
+          return
+        }
       }
       toast.success("Scenario complete")
     } finally {

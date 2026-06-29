@@ -19,7 +19,7 @@ export interface Live {
 export type Op =
   | { kind: "dispense"; v: number; asp: Port; disp: Port; path: 1 | 2; pumpPct: number }
   | { kind: "stage"; x: number; z: number; sPct: number; aPct: number }
-  | { kind: "prime"; n: number; pumpPct: number }
+  | { kind: "prime"; n: number; pumpPct: number; src: Port; disp: Port }
   | { kind: "tare" }
 
 export interface Step {
