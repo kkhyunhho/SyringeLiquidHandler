@@ -206,18 +206,20 @@ export function LinearTrack({
 }) {
   const W = 600
   const H = 76
-  const x0 = 40
-  const x1 = W - 40
   const railY = 50
+  // Tick i sits at the SAME (i+0.5)/n fraction of the full width as cell i's
+  // centre in the gap-0 grid above, so the stops line up under the gantries.
+  const tickX = (i: number) => ((i + 0.5) / cells.length) * W
+  const x0 = tickX(0)
+  const x1 = tickX(cells.length - 1)
   const frac = clamp(mm / maxMm, 0, 1)
   const cx = x0 + frac * (x1 - x0)
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
-      {/* rail */}
+      {/* rail spans first→last tick */}
       <line x1={x0} y1={railY} x2={x1} y2={railY} className="stroke-border" strokeWidth={4} />
       {cells.map((name, i) => {
-        const f = (i + 0.5) / cells.length
-        const tx = x0 + f * (x1 - x0)
+        const tx = tickX(i)
         return (
           <g key={name}>
             <line x1={tx} y1={railY - 7} x2={tx} y2={railY + 7} className="stroke-border" strokeWidth={2} />

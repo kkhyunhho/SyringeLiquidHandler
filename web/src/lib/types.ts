@@ -28,8 +28,22 @@ export interface Step {
   op: Op
 }
 
+// A replayable command, recorded on each History entry so a saved scenario
+// (a span of History) can be re-executed on the right cell.
+export type ReplayAction =
+  | { kind: "diagnose"; cell: string }
+  | { kind: "initialize"; cell: string }
+  | { kind: "tare"; cell: string }
+  | { kind: "ambient"; cell: string; level: string }
+  | { kind: "dispense"; cell: string; op: Extract<Op, { kind: "dispense" }> }
+  | { kind: "prime"; cell: string; op: Extract<Op, { kind: "prime" }> }
+  | { kind: "stage"; cell: string; op: Extract<Op, { kind: "stage" }> }
+  | { kind: "home"; cell: string }
+  | { kind: "linear"; cell: string; y: number }
+
 export interface HistEntry {
   id: number
   at: string
   label: string
+  action?: ReplayAction
 }

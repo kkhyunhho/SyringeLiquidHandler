@@ -8,6 +8,7 @@ import {
   ListChecks,
   Move3d,
   OctagonX,
+  Play,
   Plus,
   RefreshCw,
   RotateCw,
@@ -42,7 +43,15 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 
-import type { Conn, Dev, HistEntry, Live, Op, Port } from "@/lib/types"
+import type {
+  Conn,
+  Dev,
+  HistEntry,
+  Live,
+  Op,
+  Port,
+  ReplayAction,
+} from "@/lib/types"
 import {
   AMBIENT_LEVELS,
   HOME_ACC,
@@ -104,8 +113,10 @@ const WEIGH_CELL = CELLS.find((c) => c.kind === "weigh")
 interface Scenario {
   id: number
   name: string
-  from: string
-  to: string
+  fromId: number
+  toId: number
+  fromLabel: string
+  toLabel: string
 }
 
 export default function App() {
@@ -147,6 +158,7 @@ export default function App() {
   const [scenName, setScenName] = useState("")
   const [scenFrom, setScenFrom] = useState("")
   const [scenTo, setScenTo] = useState("")
+  const [running, setRunning] = useState(false) // a scenario is replaying
 
   const cellsRef = useRef(cells)
   cellsRef.current = cells
@@ -157,14 +169,14 @@ export default function App() {
   const patchLive = (id: string, fn: (l: Live) => Live) =>
     patchCell(id, (c) => ({ ...c, live: fn(c.live) }))
 
-  const pushHist = (id: string, label: string) => {
+  const pushHist = (id: string, label: string, action?: ReplayAction) => {
     const name = CELLS.find((c) => c.id === id)?.name ?? id
     const at = new Date().toLocaleTimeString()
     setHistory((h) =>
-      [{ id: histId.current++, at, label: `${name} · ${label}` }, ...h].slice(
-        0,
-        300,
-      ),
+      [
+        { id: histId.current++, at, label: `${name} · ${label}`, action },
+        ...h,
+      ].slice(0, 300),
     )
   }
 
@@ -243,13 +255,13 @@ export default function App() {
 
   const diagnoseCell = (id: string) =>
     withBusy(id, ALL_DEVS, async () => {
-      pushHist(id, "Diagnose")
+      pushHist(id, "Diagnose", { kind: "diagnose", cell: id })
       applyDiagnose(id, await clientFor(id).diagnose())
     })
 
   const initializeCell = (id: string) =>
     withBusy(id, ["pump"], async () => {
-      pushHist(id, "Initialize pump")
+      pushHist(id, "Initialize pump", { kind: "initialize", cell: id })
       const r = await clientFor(id).initialize(2)
       patchCell(id, (c) => ({
         ...c,
@@ -264,7 +276,7 @@ export default function App() {
 
   const tareCell = (id: string) =>
     withBusy(id, ["balance"], async () => {
-      pushHist(id, "Tare")
+      pushHist(id, "Tare", { kind: "tare", cell: id })
       const r = await clientFor(id).tare()
       patchLive(id, (l) => ({ ...l, weightG: r.weight_g }))
     })
@@ -272,7 +284,7 @@ export default function App() {
   const setAmbientCell = (id: string, level: string) =>
     withBusy(id, ["balance"], async () => {
       await clientFor(id).ambient(level)
-      pushHist(id, `Ambient → ${level}`)
+      pushHist(id, `Ambient → ${level}`, { kind: "ambient", cell: id, level })
     })
 
   const doActivation = async (id: string, op: Extract<Op, { kind: "dispense" }>) => {
@@ -417,30 +429,38 @@ export default function App() {
   // button wrappers act on the selected cell
   const activation = () => {
     const op = dispenseOp(selId)
-    pushHist(selId, `Dispense ${op.v} µL · Path ${op.path} · P${op.asp}→P${op.disp}`)
+    pushHist(
+      selId,
+      `Dispense ${op.v} µL · Path ${op.path} · P${op.asp}→P${op.disp}`,
+      { kind: "dispense", cell: selId, op },
+    )
     return withBusy(selId, ["pump"], () => doActivation(selId, op))
   }
   const prime = () => {
     const op = primeOp(selId)
-    pushHist(selId, `Prime ×${op.n}`)
+    pushHist(selId, `Prime ×${op.n}`, { kind: "prime", cell: selId, op })
     return withBusy(selId, ["pump"], () => doPrime(selId, op))
   }
   const moveStage = () => {
     const op = stageOp()
-    pushHist(selId, `Gantry → X ${op.x} / Z ${op.z} mm`)
+    pushHist(selId, `Gantry → X ${op.x} / Z ${op.z} mm`, {
+      kind: "stage",
+      cell: selId,
+      op,
+    })
     return withBusy(selId, ["stage"], () => doMoveStage(selId, op))
   }
   const homeStage = () => {
-    pushHist(selId, "Home gantry")
+    pushHist(selId, "Home gantry", { kind: "home", cell: selId })
     return withBusy(selId, ["stage"], () => doHome(selId))
   }
   const linearMove = () => {
     const y = clamp(Number(yTarget) || 0, 0, X_MAX_MM)
-    pushHist(selId, `Linear Y → ${y} mm`)
+    pushHist(selId, `Linear Y → ${y} mm`, { kind: "linear", cell: selId, y })
     return withBusy(selId, ["stage"], () => doLinearMove(selId, y))
   }
   const linearHome = () => {
-    pushHist(selId, "Home linear Y")
+    pushHist(selId, "Home linear Y", { kind: "home", cell: selId })
     return withBusy(selId, ["stage"], () => doHome(selId))
   }
 
@@ -471,14 +491,55 @@ export default function App() {
         .catch(() => {})
     }
     pushHist(selId, "STOP — all cells")
+    setRunning(false)
     toast.warning("STOP — all motion aborted")
+  }
+
+  // ── scenario replay: re-run a saved span of History on its cells ───────
+  const runAction = async (a: ReplayAction) => {
+    if (a.kind === "diagnose") await diagnoseCell(a.cell)
+    else if (a.kind === "initialize") await initializeCell(a.cell)
+    else if (a.kind === "tare") await tareCell(a.cell)
+    else if (a.kind === "ambient") await setAmbientCell(a.cell, a.level)
+    else if (a.kind === "dispense")
+      await withBusy(a.cell, ["pump"], () => doActivation(a.cell, a.op))
+    else if (a.kind === "prime")
+      await withBusy(a.cell, ["pump"], () => doPrime(a.cell, a.op))
+    else if (a.kind === "stage")
+      await withBusy(a.cell, ["stage"], () => doMoveStage(a.cell, a.op))
+    else if (a.kind === "home")
+      await withBusy(a.cell, ["stage"], () => doHome(a.cell))
+    else if (a.kind === "linear")
+      await withBusy(a.cell, ["stage"], () => doLinearMove(a.cell, a.y))
+  }
+
+  const runScenario = async (s: Scenario) => {
+    const lo = Math.min(s.fromId, s.toId)
+    const hi = Math.max(s.fromId, s.toId)
+    const span = history
+      .filter((h) => h.id >= lo && h.id <= hi && h.action)
+      .sort((a, b) => a.id - b.id) // oldest → newest
+    if (span.length === 0) {
+      toast.error("Scenario has no replayable commands")
+      return
+    }
+    setRunning(true)
+    try {
+      for (const h of span) {
+        toast.info(`▶ ${h.label}`)
+        await runAction(h.action!)
+      }
+      toast.success(`Scenario "${s.name}" complete`)
+    } finally {
+      setRunning(false)
+    }
   }
 
   // ── derived state for the selected cell ───────────────────────────────
   const selDef = CELLS.find((c) => c.id === selId) as CellDef
   const sc = cells[selId]
   const selBusy = sc.busy.pump || sc.busy.balance || sc.busy.stage
-  const ready = !selBusy && !sc.live.error
+  const ready = !selBusy && !sc.live.error && !running
   const canInit = ready && sc.diagnosed
   const canDrive = ready && sc.initialized
 
@@ -498,11 +559,19 @@ export default function App() {
   const histLabel = (h: HistEntry) => `${h.at} · ${h.label}`
   const saveScenario = () => {
     if (history.length === 0) return
-    const from = scenFrom || history[history.length - 1].label
-    const to = scenTo || history[0].label
+    const fromId = scenFrom ? Number(scenFrom) : history[history.length - 1].id
+    const toId = scenTo ? Number(scenTo) : history[0].id
+    const lbl = (id: number) => history.find((h) => h.id === id)?.label ?? "?"
     setScenarios((s) => [
       ...s,
-      { id: scenId.current++, name: scenName || `Scenario ${s.length + 1}`, from, to },
+      {
+        id: scenId.current++,
+        name: scenName || `Scenario ${s.length + 1}`,
+        fromId,
+        toId,
+        fromLabel: lbl(fromId),
+        toLabel: lbl(toId),
+      },
     ])
     setScenName("")
     setScenFrom("")
@@ -519,10 +588,15 @@ export default function App() {
           3-solution synthesis · {CELLS.length} cells
         </span>
         <div className="ml-auto flex items-center gap-2">
-          <Button size="sm" onClick={setupAll}>
+          <Button size="sm" onClick={setupAll} disabled={running}>
             <Wand2 className="size-4" /> Setup all
           </Button>
-          <Button variant="outline" size="sm" onClick={diagnoseAll}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={diagnoseAll}
+            disabled={running}
+          >
             <RefreshCw className="size-4" /> Diagnose all
           </Button>
           <Dialog>
@@ -610,15 +684,14 @@ export default function App() {
                 <Eye className="size-4" /> Visualization
               </CardTitle>
             </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-              <div className="grid grid-cols-3 gap-3">
+            <CardContent className="flex flex-col gap-1">
+              {/* exact-thirds grid (gap-0) so each cell centre = (i+0.5)/3 of
+                  the width — the linear-track stops below line up under them */}
+              <div className="grid grid-cols-3">
                 {DISPENSE_CELLS.map((c, i) => {
                   const lv = cells[c.id].live
                   return (
-                    <div
-                      key={c.id}
-                      className="flex flex-col items-center gap-1 rounded border p-2"
-                    >
+                    <div key={c.id} className="flex flex-col items-center gap-1 px-1">
                       <span className="text-xs font-medium text-muted-foreground">
                         {c.name} · {i + 1}
                       </span>
@@ -644,10 +717,7 @@ export default function App() {
                 })}
               </div>
               {WEIGH_CELL && (
-                <div className="rounded border p-2">
-                  <span className="text-xs font-medium text-muted-foreground">
-                    {WEIGH_CELL.name} · linear motor (balance shuttles under the cells)
-                  </span>
+                <>
                   <LinearTrack
                     mm={cells[WEIGH_CELL.id].live.stageXmm}
                     maxMm={X_MAX_MM}
@@ -656,7 +726,11 @@ export default function App() {
                     durMs={stageDurMs}
                     ease={stageEase}
                   />
-                </div>
+                  <span className="text-xs text-muted-foreground">
+                    {WEIGH_CELL.name} · linear motor — the single balance
+                    shuttles under cell1–3 to weigh each dispense
+                  </span>
+                </>
               )}
             </CardContent>
           </Card>
@@ -682,7 +756,7 @@ export default function App() {
                     </SelectTrigger>
                     <SelectContent>
                       {history.map((h) => (
-                        <SelectItem key={h.id} value={h.label}>
+                        <SelectItem key={h.id} value={String(h.id)}>
                           {histLabel(h)}
                         </SelectItem>
                       ))}
@@ -697,7 +771,7 @@ export default function App() {
                     </SelectTrigger>
                     <SelectContent>
                       {history.map((h) => (
-                        <SelectItem key={h.id} value={h.label}>
+                        <SelectItem key={h.id} value={String(h.id)}>
                           {histLabel(h)}
                         </SelectItem>
                       ))}
@@ -726,18 +800,28 @@ export default function App() {
                         <span className="font-medium">{s.name}</span>
                         <span className="text-muted-foreground">
                           {" "}
-                          — {s.from} → {s.to}
+                          — {s.fromLabel} → {s.toLabel}
                         </span>
                       </span>
-                      <Button
-                        size="icon-xs"
-                        variant="ghost"
-                        onClick={() =>
-                          setScenarios((ss) => ss.filter((x) => x.id !== s.id))
-                        }
-                      >
-                        <Trash2 className="size-3" />
-                      </Button>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          onClick={() => runScenario(s)}
+                          disabled={running}
+                        >
+                          <Play className="size-3" /> Run
+                        </Button>
+                        <Button
+                          size="icon-xs"
+                          variant="ghost"
+                          onClick={() =>
+                            setScenarios((ss) => ss.filter((x) => x.id !== s.id))
+                          }
+                        >
+                          <Trash2 className="size-3" />
+                        </Button>
+                      </div>
                     </li>
                   ))}
                 </ol>
