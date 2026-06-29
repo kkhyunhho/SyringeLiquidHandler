@@ -130,9 +130,21 @@ export function PlungerView({ uL, durMs }: { uL: number; durMs: number }) {
   )
 }
 
-// ── XZ stage view: H-gantry — two Z columns carry the X beam; a carriage
-//    rides the beam. Z = vertical (down = larger), X = horizontal. ──────────
-export function StageView({ x, z, durMs }: { x: number; z: number; durMs: number }) {
+// ── XZ gantry view: two Z columns carry the X beam; a carriage rides the
+//    beam. Z = vertical (down = larger), X = horizontal. `ease` is the CSS
+//    timing function: "linear" for accel=0 (instant speed, constant velocity
+//    per the MKS manual), "ease" for a ramped move. ─────────────────────────
+export function StageView({
+  x,
+  z,
+  durMs,
+  ease = "ease",
+}: {
+  x: number
+  z: number
+  durMs: number
+  ease?: string
+}) {
   const W = 220
   const H = 140
   const railL = 26
@@ -141,7 +153,7 @@ export function StageView({ x, z, durMs }: { x: number; z: number; durMs: number
   const bot = H - 22
   const dy = (z / Z_MAX_MM) * (bot - top) // bridge vertical offset (Z)
   const dx = (x / X_MAX_MM) * (railR - railL) // X head horizontal offset
-  const T = { transition: `transform ${durMs}ms ease` }
+  const T = { transition: `transform ${durMs}ms ${ease}` }
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
       <rect x="1" y="1" width={W - 2} height={H - 2} rx="6" className="fill-muted stroke-border" />

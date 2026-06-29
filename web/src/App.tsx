@@ -103,6 +103,7 @@ function CellDashboard({ cell, client }: { cell: CellDef; client: ApiClient }) {
   const [speedPct, setSpeedPct] = useState("20")
   const [accelPct, setAccelPct] = useState("50")
   const [stageDurMs, setStageDurMs] = useState(500)
+  const [stageEase, setStageEase] = useState("ease") // "linear" when accel=0
   const [plungerDurMs, setPlungerDurMs] = useState(400)
   const [steps, setSteps] = useState<Step[]>([])
   const [stepId, setStepId] = useState(1)
@@ -333,7 +334,10 @@ function CellDashboard({ cell, client }: { cell: CellDef; client: ApiClient }) {
     const x = clamp(op.x, 0, X_MAX_MM)
     const z = clamp(op.z, 0, Z_MAX_MM)
     const rpm = (clamp(op.sPct, 1, 100) / 100) * MAX_RPM
-    const acc = Math.round((clamp(op.aPct, 1, 100) / 100) * 255)
+    // accel: 0 is the MKS exception — no ramp, runs straight at set speed
+    // (instant). 1–100% maps to ramp code 1–255 (slow→fast).
+    const acc = Math.round((clamp(op.aPct, 0, 100) / 100) * 255)
+    setStageEase(acc === 0 ? "linear" : "ease")
     const curX = liveRef.current.stageXmm
     const curZ = liveRef.current.stageZmm
     let total = 0
@@ -360,6 +364,7 @@ function CellDashboard({ cell, client }: { cell: CellDef; client: ApiClient }) {
   // Home: vertical move first (Z → 0, up), then X → 0, at the fixed homing
   // speed — animated like a normal move (not a snap).
   const doHome = async () => {
+    setStageEase("ease") // homing accel is fixed > 0
     const curX = liveRef.current.stageXmm
     const curZ = liveRef.current.stageZmm
     let total = 0
@@ -398,7 +403,7 @@ function CellDashboard({ cell, client }: { cell: CellDef; client: ApiClient }) {
     x: clamp(Number(xTarget) || 0, 0, X_MAX_MM),
     z: clamp(Number(zTarget) || 0, 0, Z_MAX_MM),
     sPct: clamp(Number(speedPct) || 0, 1, 100),
-    aPct: clamp(Number(accelPct) || 0, 1, 100),
+    aPct: clamp(Number(accelPct) || 0, 0, 100),
   })
   const primeOp = (): Extract<Op, { kind: "prime" }> => ({
     kind: "prime",
@@ -546,7 +551,7 @@ function CellDashboard({ cell, client }: { cell: CellDef; client: ApiClient }) {
                 value={`Path ${live.path} · P${live.aspPort}→P${live.dispPort}`}
               />
               <Stat label="plunger" value={`${live.plungerUL} µL`} />
-              <Stat label="XZ stage" value={`${live.stageXmm} / ${live.stageZmm} mm`} />
+              <Stat label="XZ gantry" value={`${live.stageXmm} / ${live.stageZmm} mm`} />
               <div className="flex flex-col gap-1">
                 <span className="text-xs text-muted-foreground">state</span>
                 <div className="flex gap-4">
@@ -590,10 +595,15 @@ function CellDashboard({ cell, client }: { cell: CellDef; client: ApiClient }) {
               </div>
               <div className="flex flex-col items-center gap-1">
                 <div className="w-full max-w-[200px]">
-                  <StageView x={live.stageXmm} z={live.stageZmm} durMs={stageDurMs} />
+                  <StageView
+                    x={live.stageXmm}
+                    z={live.stageZmm}
+                    durMs={stageDurMs}
+                    ease={stageEase}
+                  />
                 </div>
                 <span className="text-xs text-muted-foreground">
-                  XZ stage (H-gantry)
+                  XZ gantry
                 </span>
               </div>
             </CardContent>
@@ -708,7 +718,7 @@ function CellDashboard({ cell, client }: { cell: CellDef; client: ApiClient }) {
                   <Beaker className="size-4" /> Pump
                 </TabsTrigger>
                 <TabsTrigger value="stage">
-                  <Move3d className="size-4" /> XZ stage
+                  <Move3d className="size-4" /> XZ gantry
                 </TabsTrigger>
               </TabsList>
 
@@ -874,7 +884,7 @@ function CellDashboard({ cell, client }: { cell: CellDef; client: ApiClient }) {
                   </div>
                   <div className="flex flex-col gap-1">
                     <Label htmlFor="acc" className="text-xs">
-                      Accel (%)
+                      Accel (%) · 0 = instant
                     </Label>
                     <Input
                       id="acc"
