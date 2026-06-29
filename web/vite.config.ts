@@ -16,6 +16,7 @@ export default defineConfig({
   // (or real). Override the target with VITE_API_TARGET if it's elsewhere.
   server: {
     host: true, // bind 0.0.0.0 so VSCode forwarding / NUC-IP access works
+    allowedHosts: true, // accept forwarded/tunnel Host headers
     proxy: {
       "/v1": {
         target: process.env.VITE_API_TARGET || "http://localhost:17054",
