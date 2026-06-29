@@ -3,12 +3,12 @@
 Cross-project bench scripts that drive the **Runze SY-01B syringe pump**
 and the **Sartorius Entris-II balance** together for liquid-handling
 measurements. The pump (`sy01b`) and balance (`entris_ii`) drivers are
-`pip install -e`'d into the shared conda env **`elec`**, so
+`pip install -e`'d into the shared conda env **`sdl`**, so
 [`cv_mass_measurement.py`](cv_mass_measurement.py) imports them directly —
 no `sys.path` bootstrap.
 
 The optional XZ stage ([`xz_stage.py`](xz_stage.py)) uses the
-MKSServo57DCANController **standalone** MKS driver, which is not in `elec`
+MKSServo57DCANController **standalone** MKS driver, which is not in `sdl`
 (its `mks_motor` import name collides with the full ESP32 driver); that one
 is added to `sys.path` from `../MKSServo57DCANController/src`.
 
@@ -137,12 +137,12 @@ Config lives at the top of `xz_stage.py`: `SERIAL_X` (default `"NTAM63XD"`),
 
 ### Dependencies
 
-Python ≥ 3.12, in the shared conda env **`elec`** (new terminals activate
-it). The pump and balance drivers are `pip install -e`'d into `elec`, so
+Python ≥ 3.12, in the shared conda env **`sdl`** (new terminals activate
+it). The pump and balance drivers are `pip install -e`'d into `sdl`, so
 this cell only needs its own extras:
 
 ```bash
-conda activate elec
+conda activate sdl
 pip install -r requirements.txt   # openpyxl (+ ftd2xx for the XZ stage)
 ```
 
@@ -153,7 +153,7 @@ stage, set `MOTOR_STAGE_ENABLE = False` and `ftd2xx` is never imported.
 ### Run
 
 ```bash
-conda activate elec
+conda activate sdl
 python cv_mass_measurement.py
 ```
 

@@ -54,7 +54,7 @@ from pathlib import Path
 import serial.tools.list_ports
 
 # The pump and balance drivers are installed (pip install -e) into the
-# shared conda env `elec`, so they import directly — no sys.path bootstrap.
+# shared conda env `sdl`, so they import directly — no sys.path bootstrap.
 from entris_ii import PrecisionScaleController
 from sy01b import SyringePumpController
 

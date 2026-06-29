@@ -30,9 +30,9 @@ from pathlib import Path
 
 # This stage uses the MKSServo57DCANController *standalone* MKS driver
 # (ftd2xx-based, single-axis harness), which is deliberately NOT installed
-# into the shared `elec` env — its import name `mks_motor` would collide
+# into the shared `sdl` env — its import name `mks_motor` would collide
 # with the full ESP32 driver — so add its src/ to sys.path here. The pump
-# and balance drivers, by contrast, import directly from `elec`.
+# and balance drivers, by contrast, import directly from `sdl`.
 # TODO: migrate to the full ESP32 mks_motor driver once the two converge.
 _WORKSPACE_ROOT = Path(__file__).resolve().parents[1]
 _MKS_SRC = _WORKSPACE_ROOT / "MKSServo57DCANController" / "src"

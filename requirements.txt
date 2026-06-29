@@ -1,10 +1,10 @@
 # Python dependencies for the SyringeLiquidHandler scripts.
-# Install into the shared env:  conda activate elec && pip install -r requirements.txt
+# Install into the shared env:  conda activate sdl && pip install -r requirements.txt
 # Requires Python >= 3.12.
 #
 # The pump (sy01b) and balance (entris_ii) drivers are pip install -e'd into
-# the elec env and import directly — not listed here. The XZ stage uses the
-# MKSServo57DCANController standalone mks_motor via sys.path (not in elec);
+# the sdl env and import directly — not listed here. The XZ stage uses the
+# MKSServo57DCANController standalone mks_motor via sys.path (not in sdl);
 # it needs ftd2xx (below).
 
 pyserial>=3.5    # serial link to the balance (entris_ii) and pump (sy01b)

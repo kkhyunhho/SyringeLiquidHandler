@@ -24,13 +24,13 @@ workspace root** (the bootstrap resolves paths from
 
 ## Conventions
 
-For shared conventions — code style, the `elec` env, testing, terminology
+For shared conventions — code style, the `sdl` env, testing, terminology
 (**Level** = control-code depth; **Phase** = SDL hardware stage;
 composition = device → **cell** → Phase-system), and task/commit rules —
 see **SDLClaude** (`kkhyunhho/SDLClaude`), the single source of truth.
 
 This folder is a **cell**: it composes the pump (`sy01b`) and balance
-(`entris_ii`) drivers — both `pip install -e`'d into `elec` — into a
+(`entris_ii`) drivers — both `pip install -e`'d into `sdl` — into a
 gravimetric liquid-handling measurement, with an optional XZ motion stage.
 Where this file is silent, SDLClaude governs.
 
@@ -46,19 +46,19 @@ Where this file is silent, SDLClaude governs.
 | `real_cell.py` | `SyringeCell` — real drivers behind `Cell` (pump/balance wired; stage `home` only, `move` pending the xz_stage→ESP32 mks_motor migration). |
 | `tests/server/` | `FakeCell` + route tests (no hardware). |
 | `README.md` | User-facing usage, configuration, workbook layout. |
-| `requirements.txt` | `openpyxl` (+ `ftd2xx` for the standalone XZ motor). Pump/balance drivers come from the `elec` env, not `sys.path`. |
+| `requirements.txt` | `openpyxl` (+ `ftd2xx` for the standalone XZ motor). Pump/balance drivers come from the `sdl` env, not `sys.path`. |
 | `LearnedPatterns.md` | Running log of gotchas (see below). |
 | `example_cv_mass_measurement_tip30G.xlsx` | Sample output (fake data). |
 
-- **Shared conda env `elec`** (Python 3.12); new terminals activate it.
+- **Shared conda env `sdl`** (Python 3.12); new terminals activate it.
   The pump (`sy01b`) and balance (`entris_ii`) drivers are `pip install -e`'d
-  into `elec`, so [`cv_mass_measurement.py`](cv_mass_measurement.py) imports
+  into `sdl`, so [`cv_mass_measurement.py`](cv_mass_measurement.py) imports
   them directly — no `sys.path` bootstrap.
 - **XZ stage motor:** [`xz_stage.py`](xz_stage.py) uses the
   **MKSServo57DCANController standalone** MKS driver (`ftd2xx`-based), which
-  is *not* installed in `elec` (its import name `mks_motor` collides with
+  is *not* installed in `sdl` (its import name `mks_motor` collides with
   the full ESP32 driver). It is added to `sys.path` from that repo's `src/`.
-  `ftd2xx` is installed in `elec`.
+  `ftd2xx` is installed in `sdl`.
 - Runs in a Docker container; the container's `/dev` is a private tmpfs, so
   USB device nodes can go stale after re-enumeration / a Docker restart.
 
@@ -66,7 +66,7 @@ Where this file is silent, SDLClaude governs.
 
 | Purpose | Command |
 |---|---|
-| Run a measurement | `conda activate elec && python cv_mass_measurement.py` |
+| Run a measurement | `conda activate sdl && python cv_mass_measurement.py` |
 | Run the /v1 server | `cp server/slh.toml.example server/slh.toml` then `python -m server` |
 | Test the server | `python -m pytest tests/server/` (FakeCell, no hardware) |
 | Lint | `ruff check cv_mass_measurement.py` |
