@@ -18,11 +18,13 @@ cell shapes live here (the SDLClaude reference implementations):
 The legacy standalone scripts (`cv_mass_measurement.py` + `xz_stage.py`) for
 the original gravimetric-CV bench still live here too.
 
-All hardware drivers are imported from the **shared `sdl` env** (`sy01b`,
-`entris_ii`, `mks_motor` are `pip install -e`'d into it); `lmc` re-exports
-the flat `LinearMotorController` module from `../LinearMotorController` via
-`sys.path` (see `lmc.py`). (Self-containing the repo via packaging+pin is a
-tracked task.)
+**Self-contained (hybrid).** `requirements.txt` **git-pins** the three
+sibling drivers (`sy01b`, `entris_ii`, `mks_motor`) to a commit, so a fresh
+`pip install -r requirements.txt` pulls them from GitHub — no local clones
+needed. The MINAS A6 linear driver (`lmc`) isn't pip-pinnable upstream (flat
+module), so it is **vendored** at `vendor/linear_motor_controller.py`. (The
+dev `sdl` env still has the drivers as editable installs; the git-pins are
+for fresh/deployment installs.)
 
 ## Conventions
 
@@ -43,7 +45,8 @@ Where this file is silent, SDLClaude governs.
 | `cell_protocol.py` | `Cell` protocol + `CellError` hierarchy the server maps to HTTP. |
 | `dispense_cell.py` | `DispenseCell` (cell1–3) — pump (`sy01b`) + XZ gantry (ESP32 `mks_motor`, paired-Z interlock), no balance. |
 | `weigh_cell.py` | `WeighCell` — real cell4 behind `Cell`: MINAS A6 linear rail (`lmc`) + Entris-II balance, no pump. Run with `python -m server --cell weigh`. |
-| `lmc.py` | Codename `lmc` — re-exports the MINAS A6 driver from the sibling `../LinearMotorController` repo (clone it; flat module added via `sys.path`). |
+| `lmc.py` | Codename `lmc` — re-exports the **vendored** MINAS A6 driver. |
+| `vendor/` | Vendored third-party drivers not pip-pinnable upstream (the MINAS A6 `linear_motor_controller`). |
 | `tests/server/` | `FakeCell` + route tests (no hardware). |
 | `README.md` | User-facing usage, configuration, workbook layout. |
 | `requirements.txt` | `openpyxl` (+ `ftd2xx` for the standalone XZ motor). Pump/balance drivers come from the `sdl` env, not `sys.path`. |

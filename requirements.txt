@@ -1,22 +1,24 @@
-# Python dependencies for the SyringeLiquidHandler scripts.
-# Install into the shared env:  conda activate sdl && pip install -r requirements.txt
-# Requires Python >= 3.12.
+# Python dependencies for SyringeLiquidHandler. Requires Python >= 3.12.
+#   conda activate sdl && pip install -r requirements.txt
 #
-# The pump (sy01b) and balance (entris_ii) drivers are pip install -e'd into
-# the sdl env and import directly — not listed here. The XZ stage uses the
-# MKSServo57DCANController standalone mks_motor via sys.path (not in sdl);
-# it needs ftd2xx (below).
+# Self-contained (hybrid): the three sibling drivers are pinned to a git
+# commit so a fresh env pulls them from GitHub (no local clones needed); the
+# MINAS A6 linear driver (`lmc`) is vendored under vendor/ (not pip-pinnable
+# upstream — flat module, no pyproject). Re-pin a driver by bumping its @sha.
 
-pyserial>=3.5    # serial link to the balance (entris_ii) and pump (sy01b)
-openpyxl>=3.1.5  # .xlsx result workbook (pulls in et-xmlfile)
+# ── Hardware drivers (git-pinned) ──────────────────────────────────────────
+sy01b @ git+https://github.com/kkhyunhho/SyringePumpController.git@5ae0d56
+entris_ii @ git+https://github.com/kkhyunhho/PrecisionScaleController.git@ad85d6c
+mks_motor @ git+https://github.com/kkhyunhho/ESP32S3BOX3MotorController.git@c156a37
+# lmc (MINAS A6 linear) → vendored at vendor/linear_motor_controller.py.
 
-# XZ-stage motors (xz_stage.py) talk to the MKS SERVO57D drivers over the
-# FTDI USB2CAN adapters via the D2XX API. ftd2xx is a thin ctypes wrapper
-# and also needs FTDI's system D2XX library (libftd2xx) installed, plus the
-# kernel ftdi_sio driver unbound (xz_stage.release_ftdi_sio handles that).
-ftd2xx>=1.3.8    # XZ-stage motor control (MKS SERVO57D via USB2CAN)
+# ── Transports / libs the drivers + cell need ──────────────────────────────
+pyserial>=3.5    # pump (sy01b), balance (entris_ii), linear (lmc) over serial
+pyftdi>=0.55     # XZ gantry (ESP32 mks_motor) over FTDI USB2CAN
+ftd2xx>=1.3.8    # legacy xz_stage.py (MKS standalone via D2XX); needs libftd2xx
+openpyxl>=3.1.5  # .xlsx result workbook (cv_mass_measurement / report)
 
-# L1 /v1 server (server/ package). The web UI / ESP32 are HTTP clients.
+# ── L1 /v1 server (server/) ────────────────────────────────────────────────
 fastapi>=0.115        # /v1 app + pydantic schemas
 uvicorn>=0.30         # ASGI server (python -m server)
 httpx>=0.27           # required by fastapi.testclient (tests/server)

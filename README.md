@@ -24,7 +24,7 @@ web (React, web/)  ──HTTP /v1──▶  server/ (FastAPI)  ──▶  Cell  
 | [`dispense_cell.py`](dispense_cell.py) | `DispenseCell` — pump + XZ gantry (ESP32 `mks_motor`) |
 | [`weigh_cell.py`](weigh_cell.py) | `WeighCell` — MINAS A6 linear (`lmc`) + balance |
 | [`fake_cell.py`](fake_cell.py) | in-memory `FakeCell` for tests + `--fake` dev |
-| [`lmc.py`](lmc.py) | re-exports the MINAS A6 driver from `../LinearMotorController` |
+| [`lmc.py`](lmc.py) | re-exports the **vendored** MINAS A6 driver (`vendor/`) |
 | [`server/`](server/) | `create_app` + `/v1` routes + schemas + error mapping + `__main__` |
 | [`web/`](web/) | the operator UI (one web for the whole Phase; cell switcher) |
 
