@@ -1,15 +1,16 @@
-"""Real :class:`cell.Cell` over the live pump, balance, and XZ stage.
+"""Real dispense cell (cell1): pump (``sy01b``) + XZ gantry (ESP32 ``mks_motor``).
 
-Pump/balance wiring mirrors the proven sequence in
-``cv_mass_measurement.py``. The stage is only partly wired: ``home_stage``
-drives ``xz_stage.home_and_position`` (the one motion that module exposes),
-while arbitrary ``move_stage`` waits on the planned migration of
-``xz_stage.py`` onto the ESP32 full ``mks_motor`` driver (tracked
-separately) and raises until then.
+A dispensing cell has **no balance** — the Phase's single balance lives on
+cell4 (see ``weigh_cell.py``), so the balance methods of the :class:`cell.Cell`
+protocol raise here. The XZ gantry is the three MKS SERVO57D motors driven by
+the **full ESP32 ``mks_motor``** driver (paired-Z safety interlock, pyftdi),
+addressed by FTDI serial — not the standalone used by the legacy
+``xz_stage.py``.
 
-Construct with :meth:`SyringeCell.open`; the server's ``__main__`` injects
-that as the ``cell_factory``. Hardware-verified at the bench, not in CI —
-CI exercises the server against ``tests/server/conftest.FakeCell``.
+Pump calls mirror the proven sequence in ``cv_mass_measurement.py``; gantry
+calls mirror ``ESP32S3BOX3MotorController/bridge.py`` (``open_xz`` +
+``move_sync`` + ``home_xz``). Motion order is up → X → down (never diagonal).
+Hardware-verified at the bench, not in CI.
 """
 
 from __future__ import annotations
@@ -17,43 +18,47 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 
-from entris_ii import PrecisionScaleController
+from mks_motor import MKSMotor
 from sy01b import SyringePumpController
 
-from cell import (
-    AMBIENT_LEVELS,
-    Cell,
-    DeviceFaultError,
-    InvalidArgError,
-    WrongStateError,
-)
+from cell import Cell, DeviceFaultError, WrongStateError
 
 
 @dataclass(frozen=True, slots=True)
 class Config:
-    """Bench wiring for the cell (loaded from slh.toml)."""
+    """Bench wiring for a dispense cell (loaded from slh.toml)."""
 
     pump_port: str = "1A86:7523"
     pump_address: int = 1
     pump_baud: int = 9600
     syringe_uL: int = 125
     pump_init_force: int = 2
-    scale_port: str | None = None  # None → auto-detect by Sartorius VID
-    ambient: str | None = None
-    stage_enable: bool = False
+    # XZ gantry: FTDI serial of the X adapter; the other two adapters are the
+    # paired Z (order doesn't matter — they always move together).
+    motor_serial_x: str = "NTAM63XD"
+    z_coord_invert: bool = True
+    home_dir_z: int = 0x00
+    home_dir_x: int = 0x00
+
+
+def _no_balance() -> WrongStateError:
+    return WrongStateError("dispense cell has no balance", command="balance")
 
 
 class SyringeCell(Cell):
-    """Composition of pump (sy01b) + balance (entris_ii) + XZ stage."""
+    """cell1 = syringe pump + XZ gantry, behind :class:`cell.Cell`."""
 
     def __init__(
         self,
         pump: SyringePumpController,
-        scale: PrecisionScaleController,
+        za: MKSMotor,
+        zb: MKSMotor,
+        x: MKSMotor,
         config: Config,
     ) -> None:
         self._pump = pump
-        self._scale = scale
+        self._x = x
+        self._z_motors = [za, zb]
         self._cfg = config
         self._plunger_uL = 0.0
         self._stage_x_mm = 0.0
@@ -62,7 +67,6 @@ class SyringeCell(Cell):
 
     @classmethod
     def open(cls, config: Config) -> SyringeCell:
-        scale_port = config.scale_port or PrecisionScaleController.find_port()
         pump_cfg = SyringePumpController.Config(
             port=config.pump_port,
             address=config.pump_address,
@@ -71,12 +75,12 @@ class SyringeCell(Cell):
             step_mode=SyringePumpController.StepMode.NORMAL,
             reply_timeout_s=2.0,
         )
-        scale = PrecisionScaleController(port=scale_port)
-        scale.__enter__()  # opens the SBI link (context-manager protocol)
         pump = SyringePumpController.open(pump_cfg)
-        if config.ambient is not None:
-            scale.set_ambient(config.ambient)
-        return cls(pump, scale, config)
+        # Opens all three USB2CAN adapters by serial (X explicit, two Z auto).
+        za, zb, x = MKSMotor.open_xz(
+            config.motor_serial_x, z_coord_invert=config.z_coord_invert
+        )
+        return cls(pump, za, zb, x, config)
 
     # ── Discovery ───────────────────────────────────────────────────────
     def diagnose(self) -> dict:
@@ -90,25 +94,19 @@ class SyringeCell(Cell):
                 "valve": report.valve_position,
                 "ok": report.ok_to_initialize,
             },
-            "balance": {
-                "model": self._scale.get_model_number(),
-                "serial_number": self._scale.get_serial_number(),
+            # No balance on a dispense cell; ok=True so the cell isn't faulted.
+            "balance": {"present": False, "ok": True},
+            "stage": {  # the XZ gantry (3 MKS motors)
+                "serial_x": self._cfg.motor_serial_x,
                 "ok": True,
             },
-            "stage": {
-                "enabled": self._cfg.stage_enable,
-                "ok": self._cfg.stage_enable,
-            },
             "ok_to_initialize": report.ok_to_initialize,
-            "versions": {
-                "pump": report.software_version,
-                "balance": self._scale.get_model_number(),
-            },
+            "versions": {"pump": report.software_version},
         }
 
     def status(self) -> dict:
         return {
-            "weight_g": self.read_weight()[0],
+            "weight_g": 0.0,  # no balance on this cell
             "valve": self._pump.query_valve_position(),
             "plunger_uL": self._plunger_uL,
             "stage_x_mm": self._stage_x_mm,
@@ -117,22 +115,15 @@ class SyringeCell(Cell):
             "error": None,
         }
 
-    # ── Balance ─────────────────────────────────────────────────────────
+    # ── Balance (none on a dispense cell) ───────────────────────────────
     def tare(self) -> float:
-        self._scale.tare()
-        return 0.0
+        raise _no_balance()
 
     def read_weight(self) -> tuple[float, bool]:
-        reading = self._scale.read_stable_weight()
-        return float(reading.value), True
+        raise _no_balance()
 
     def set_ambient(self, level: str) -> str:
-        if level not in AMBIENT_LEVELS:
-            raise InvalidArgError(
-                f"level must be one of {AMBIENT_LEVELS}, got {level!r}"
-            )
-        self._scale.set_ambient(level)
-        return level
+        raise _no_balance()
 
     # ── Pump ────────────────────────────────────────────────────────────
     def initialize(self, *, force: int = 2, ccw: bool = False) -> dict:
@@ -182,13 +173,25 @@ class SyringeCell(Cell):
             "final_valve": self._pump.query_valve_position(),
         }
 
-    # ── Stage ───────────────────────────────────────────────────────────
-    def home_stage(self) -> tuple[float, float]:
-        if not self._cfg.stage_enable:
-            raise WrongStateError("stage disabled in config")
-        import xz_stage
+    # ── Stage = XZ gantry ───────────────────────────────────────────────
+    # All gantry motion goes through the driver's high-level API
+    # (move_sync / home_xz / stop_group_hard) and NEVER MKSMotor._send
+    # directly. This is critical: those entry points run the driver's
+    # _is_at_limit() check and pre-send a sacrificial command to absorb the
+    # MKS-firmware quirk that drops the first motion command issued while a
+    # limit switch is closed. Bypassing them would reproduce that bug.
+    def _move_z(self, target: float, sp: int, ac: int) -> None:
+        MKSMotor.move_sync(self._z_motors, [(target, sp, ac)])
+        self._stage_z_mm = target
 
-        xz_stage.home_and_position()
+    def _move_x(self, target: float, sp: int, ac: int) -> None:
+        MKSMotor.move_sync([self._x], [(target, sp, ac)])
+        self._stage_x_mm = target
+
+    def home_stage(self) -> tuple[float, float]:
+        MKSMotor.home_xz(
+            self._z_motors, self._x, self._cfg.home_dir_z, self._cfg.home_dir_x
+        )
         self._stage_x_mm = 0.0
         self._stage_z_mm = 0.0
         return (0.0, 0.0)
@@ -196,31 +199,33 @@ class SyringeCell(Cell):
     def move_stage(
         self, x_mm: float, z_mm: float, *, speed_pct: int, accel_pct: int
     ) -> tuple[float, float]:
-        # xz_stage.py only exposes home_and_position(); arbitrary moves wait
-        # on the ESP32 mks_motor migration (see module docstring + draft).
-        raise WrongStateError(
-            "arbitrary XZ move pending xz_stage → ESP32 mks_motor migration; "
-            "only /stage/home is wired"
-        )
+        # up → X → down (never diagonal). If X is unchanged, drop Z straight.
+        if x_mm == self._stage_x_mm:
+            self._move_z(z_mm, speed_pct, accel_pct)
+        else:
+            self._move_z(0.0, speed_pct, accel_pct)  # up
+            self._move_x(x_mm, speed_pct, accel_pct)  # X
+            self._move_z(z_mm, speed_pct, accel_pct)  # down
+        return (self._stage_x_mm, self._stage_z_mm)
 
     # ── Safety / lifecycle ──────────────────────────────────────────────
     def stop(self) -> None:
-        # Best-effort: halt the pump. Stage halt arrives with the migration.
+        # Hard-stop the whole gantry group; halt the pump if it exposes one.
+        try:
+            MKSMotor.stop_group_hard(self._z_motors + [self._x])
+        except Exception as e:  # noqa: BLE001 — surface as a device fault
+            raise DeviceFaultError(f"gantry stop failed: {e}", command="stop")
         halt = getattr(self._pump, "halt", None) or getattr(self._pump, "stop", None)
         if callable(halt):
             halt()
-        else:
-            raise DeviceFaultError("pump exposes no halt/stop", command="stop")
 
     def close(self) -> None:
-        for dev, closer in (
-            (self._pump, "close"),
-            (self._scale, "__exit__"),
-        ):
-            fn = getattr(dev, closer, None)
-            if not callable(fn):
-                continue
-            try:
-                fn(None, None, None) if closer == "__exit__" else fn()
-            except Exception:  # noqa: BLE001 — best-effort shutdown
-                print(f"warning: {type(dev).__name__}.{closer} failed", file=sys.stderr)
+        for dev in (self._x, *self._z_motors, self._pump):
+            fn = getattr(dev, "close", None)
+            if callable(fn):
+                try:
+                    fn()
+                except Exception:  # noqa: BLE001 — best-effort shutdown
+                    print(
+                        f"warning: {type(dev).__name__}.close failed", file=sys.stderr
+                    )

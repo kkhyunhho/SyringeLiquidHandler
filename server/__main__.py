@@ -31,7 +31,6 @@ class ServerConfig:
 def _load(path: Path) -> tuple[Config, ServerConfig]:
     raw = tomllib.loads(path.read_text(encoding="utf-8"))
     pump = raw.get("pump", {})
-    balance = raw.get("balance", {})
     stage = raw.get("stage", {})
     server = raw.get("server", {})
     cell_cfg = Config(
@@ -40,9 +39,10 @@ def _load(path: Path) -> tuple[Config, ServerConfig]:
         pump_baud=int(pump.get("baud", 9600)),
         syringe_uL=int(pump.get("syringe_uL", 125)),
         pump_init_force=int(pump.get("init_force", 2)),
-        scale_port=balance.get("port"),
-        ambient=balance.get("ambient"),
-        stage_enable=bool(stage.get("enable", False)),
+        motor_serial_x=stage.get("serial_x", "NTAM63XD"),
+        z_coord_invert=bool(stage.get("z_coord_invert", True)),
+        home_dir_z=int(stage.get("home_dir_z", 0)),
+        home_dir_x=int(stage.get("home_dir_x", 0)),
     )
     server_cfg = ServerConfig(
         host=server.get("host", "0.0.0.0"),

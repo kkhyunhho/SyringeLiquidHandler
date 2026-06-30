@@ -8,18 +8,24 @@ baud = 9600
 syringe_uL = 125
 init_force = 2        # 0/1/2 or 10..40 Z-init force code
 
+[stage]
+# Dispense cell (cell1–3) XZ gantry: 3 MKS SERVO57D via the ESP32 mks_motor
+# driver. serial_x = FTDI serial of the X adapter; the other two adapters are
+# the paired Z (auto-assigned, order-independent).
+serial_x = "NTAM63XD"
+z_coord_invert = true
+# home_dir_z = 0       # flip 0<->1 to home off the opposite end
+# home_dir_x = 0
+
+# Weigh cell (cell4) only — used with `python -m server --cell weigh`:
+# the MINAS A6 linear rail (codename `lmc`) over RS485 + the balance.
+[linear]
+port = "/dev/ttyUSB0"
+
 [balance]
 # Omit `port` to auto-detect the Sartorius balance by vendor ID 0x24BC.
 # port = "24BC:0010"
 ambient = "very_unstable"   # very_stable | stable | unstable | very_unstable
-
-[stage]
-enable = false        # true once xz_stage is migrated to the ESP32 mks_motor
-
-# Weigh cell (cell4) only — used with `python -m server --cell weigh`.
-# The MINAS A6 linear rail (codename `lmc`) over RS485 (TI USB3410).
-[linear]
-port = "/dev/ttyUSB0"
 
 [server]
 host = "0.0.0.0"
