@@ -44,6 +44,8 @@ Where this file is silent, SDLClaude governs.
 | `server/` | FastAPI **L1 `/v1` server** — thin HTTP bridge over the cell (mirrors `sy01b-server`). See [WEB_V1_DRAFT.md](WEB_V1_DRAFT.md). |
 | `cell.py` | `Cell` protocol + `CellError` hierarchy the server maps to HTTP. |
 | `real_cell.py` | `SyringeCell` — real drivers behind `Cell` (pump/balance wired; stage `home` only, `move` pending the xz_stage→ESP32 mks_motor migration). |
+| `weigh_cell.py` | `WeighCell` — real cell4 behind `Cell`: MINAS A6 linear rail (`lmc`) + Entris-II balance, no pump. Run with `python -m server --cell weigh`. |
+| `lmc.py` | Codename `lmc` — re-exports the MINAS A6 driver from the sibling `../LinearMotorController` repo (clone it; flat module added via `sys.path`). |
 | `tests/server/` | `FakeCell` + route tests (no hardware). |
 | `README.md` | User-facing usage, configuration, workbook layout. |
 | `requirements.txt` | `openpyxl` (+ `ftd2xx` for the standalone XZ motor). Pump/balance drivers come from the `sdl` env, not `sys.path`. |

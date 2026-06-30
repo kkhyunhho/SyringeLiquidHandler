@@ -16,7 +16,12 @@ ambient = "very_unstable"   # very_stable | stable | unstable | very_unstable
 [stage]
 enable = false        # true once xz_stage is migrated to the ESP32 mks_motor
 
+# Weigh cell (cell4) only — used with `python -m server --cell weigh`.
+# The MINAS A6 linear rail (codename `lmc`) over RS485 (TI USB3410).
+[linear]
+port = "/dev/ttyUSB0"
+
 [server]
 host = "0.0.0.0"
-port = 17054
+port = 17054          # cell1–3 (dispense). For cell4 (weigh) use 17060.
 log_level = "info"

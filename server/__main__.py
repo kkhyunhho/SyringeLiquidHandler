@@ -18,6 +18,7 @@ import uvicorn
 
 from real_cell import Config, SyringeCell
 from server.app import create_app
+from weigh_cell import WeighCell, WeighConfig
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +52,24 @@ def _load(path: Path) -> tuple[Config, ServerConfig]:
     return cell_cfg, server_cfg
 
 
+def _load_weigh(path: Path) -> tuple[WeighConfig, ServerConfig]:
+    raw = tomllib.loads(path.read_text(encoding="utf-8"))
+    linear = raw.get("linear", {})
+    balance = raw.get("balance", {})
+    server = raw.get("server", {})
+    weigh_cfg = WeighConfig(
+        linear_port=linear.get("port", "/dev/ttyUSB0"),
+        scale_port=balance.get("port"),
+        ambient=balance.get("ambient"),
+    )
+    server_cfg = ServerConfig(
+        host=server.get("host", "0.0.0.0"),
+        port=int(server.get("port", 17060)),  # cell4 default
+        log_level=server.get("log_level", "info"),
+    )
+    return weigh_cfg, server_cfg
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="slh-server")
     parser.add_argument(
@@ -60,6 +79,16 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             "TOML config path. Default: $SLH_SERVER_CONFIG env var, "
             "otherwise ./server/slh.toml."
+        ),
+    )
+    parser.add_argument(
+        "--cell",
+        choices=("dispense", "weigh"),
+        default="dispense",
+        help=(
+            "Which cell shape this server serves: 'dispense' (cell1–3: pump + "
+            "XZ gantry, default) or 'weigh' (cell4: MINAS A6 linear rail + "
+            "balance)."
         ),
     )
     parser.add_argument(
@@ -98,9 +127,15 @@ def main(argv: list[str] | None = None) -> int:
 
     if not cfg_path.exists():
         parser.error(f"config file not found: {cfg_path}")
-    cell_cfg, server_cfg = _load(cfg_path)
 
-    app = create_app(cell_factory=lambda: SyringeCell.open(cell_cfg))
+    if args.cell == "weigh":
+        weigh_cfg, server_cfg = _load_weigh(cfg_path)
+        factory = lambda: WeighCell.open(weigh_cfg)  # noqa: E731
+    else:
+        cell_cfg, server_cfg = _load(cfg_path)
+        factory = lambda: SyringeCell.open(cell_cfg)  # noqa: E731
+
+    app = create_app(cell_factory=factory)
     uvicorn.run(
         app,
         host=server_cfg.host,
