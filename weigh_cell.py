@@ -2,7 +2,7 @@
 
 cell4 carries the Phase's single balance on a linear rail and shuttles it
 under cell1–3 to weigh each dispense. It has **no pump**, so the pump methods
-of the :class:`cell.Cell` protocol raise. The ``stage`` axis is the linear
+of the :class:`cell_protocol.Cell` protocol raise. The ``stage`` axis is the linear
 rail: absolute Y positioning uses the driver's soft closed-loop
 ``move_to_mm`` (±0.1 mm). Hardware-verified at the bench, not in CI.
 """
@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from entris_ii import PrecisionScaleController
 
-from cell import (
+from cell_protocol import (
     AMBIENT_LEVELS,
     Cell,
     InvalidArgError,

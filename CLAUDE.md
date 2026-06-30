@@ -42,8 +42,8 @@ Where this file is silent, SDLClaude governs.
 | `report.py` | Excel report rendering (heat-map styling + workbook writer), split out of `cv_mass_measurement.py`. |
 | `xz_stage.py` | XZ gantry bring-up (MKS SERVO57D motors): home + move to the measurement position. |
 | `server/` | FastAPI **L1 `/v1` server** — thin HTTP bridge over the cell (mirrors `sy01b-server`). See [WEB_V1_DRAFT.md](WEB_V1_DRAFT.md). |
-| `cell.py` | `Cell` protocol + `CellError` hierarchy the server maps to HTTP. |
-| `real_cell.py` | `SyringeCell` — real drivers behind `Cell` (pump/balance wired; stage `home` only, `move` pending the xz_stage→ESP32 mks_motor migration). |
+| `cell_protocol.py` | `Cell` protocol + `CellError` hierarchy the server maps to HTTP. |
+| `dispense_cell.py` | `DispenseCell` (cell1–3) — pump (`sy01b`) + XZ gantry (ESP32 `mks_motor`, paired-Z interlock), no balance. |
 | `weigh_cell.py` | `WeighCell` — real cell4 behind `Cell`: MINAS A6 linear rail (`lmc`) + Entris-II balance, no pump. Run with `python -m server --cell weigh`. |
 | `lmc.py` | Codename `lmc` — re-exports the MINAS A6 driver from the sibling `../LinearMotorController` repo (clone it; flat module added via `sys.path`). |
 | `tests/server/` | `FakeCell` + route tests (no hardware). |

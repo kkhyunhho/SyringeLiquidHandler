@@ -16,7 +16,7 @@ from pathlib import Path
 
 import uvicorn
 
-from real_cell import Config, SyringeCell
+from dispense_cell import Config, DispenseCell
 from server.app import create_app
 from weigh_cell import WeighCell, WeighConfig
 
@@ -142,7 +142,7 @@ def main(argv: list[str] | None = None) -> int:
         factory = lambda: WeighCell.open(weigh_cfg)  # noqa: E731
     else:
         cell_cfg, server_cfg = _load(cfg_path)
-        factory = lambda: SyringeCell.open(cell_cfg)  # noqa: E731
+        factory = lambda: DispenseCell.open(cell_cfg)  # noqa: E731
 
     app = create_app(cell_factory=factory)
     uvicorn.run(

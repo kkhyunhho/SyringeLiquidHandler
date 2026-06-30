@@ -1,7 +1,7 @@
-"""In-memory :class:`cell.Cell` for tests and hardware-free dev runs.
+"""In-memory :class:`cell_protocol.Cell` for tests and hardware-free dev runs.
 
 ``FakeCell`` keeps the whole cell state in plain Python attributes — no
-serial ports, no drivers — and raises the same :class:`cell.CellError`
+serial ports, no drivers — and raises the same :class:`cell_protocol.CellError`
 subclasses the real cell would, so ``server.errors`` maps them identically.
 
 Used two ways:
@@ -12,7 +12,7 @@ Used two ways:
 
 from __future__ import annotations
 
-from cell import AMBIENT_LEVELS, InvalidArgError, WrongStateError
+from cell_protocol import AMBIENT_LEVELS, InvalidArgError, WrongStateError
 
 SYRINGE_UL = 125.0
 

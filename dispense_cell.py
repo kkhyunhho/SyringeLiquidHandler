@@ -1,7 +1,7 @@
 """Real dispense cell (cell1): pump (``sy01b``) + XZ gantry (ESP32 ``mks_motor``).
 
 A dispensing cell has **no balance** — the Phase's single balance lives on
-cell4 (see ``weigh_cell.py``), so the balance methods of the :class:`cell.Cell`
+cell4 (see ``weigh_cell.py``), so the balance methods of the :class:`cell_protocol.Cell`
 protocol raise here. The XZ gantry is the three MKS SERVO57D motors driven by
 the **full ESP32 ``mks_motor``** driver (paired-Z safety interlock, pyftdi),
 addressed by FTDI serial — not the standalone used by the legacy
@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from mks_motor import MKSMotor
 from sy01b import SyringePumpController
 
-from cell import Cell, DeviceFaultError, WrongStateError
+from cell_protocol import Cell, DeviceFaultError, WrongStateError
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,8 +45,8 @@ def _no_balance() -> WrongStateError:
     return WrongStateError("dispense cell has no balance", command="balance")
 
 
-class SyringeCell(Cell):
-    """cell1 = syringe pump + XZ gantry, behind :class:`cell.Cell`."""
+class DispenseCell(Cell):
+    """cell1 = syringe pump + XZ gantry, behind :class:`cell_protocol.Cell`."""
 
     def __init__(
         self,
@@ -66,7 +66,7 @@ class SyringeCell(Cell):
         self._initialized = False
 
     @classmethod
-    def open(cls, config: Config) -> SyringeCell:
+    def open(cls, config: Config) -> DispenseCell:
         pump_cfg = SyringePumpController.Config(
             port=config.pump_port,
             address=config.pump_address,
