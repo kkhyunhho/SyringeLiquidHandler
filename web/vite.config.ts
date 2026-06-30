@@ -11,13 +11,26 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
-  // Dev: forward /v1/* to the FastAPI server so the browser calls it
-  // same-origin (no CORS). Run the server with `python -m server --fake`
-  // (or real). Override the target with VITE_API_TARGET if it's elsewhere.
+  // Dev: forward each cell's API to its /v1 server (same-origin, no CORS).
+  // Per-cell bases (cells.ts) map to per-cell ports; "/v1" stays as a default.
+  // Run a server (real, or `python -m server [--cell weigh] --fake`) per port.
   server: {
     host: true, // bind 0.0.0.0 so VSCode forwarding / NUC-IP access works
     allowedHosts: true, // accept forwarded/tunnel Host headers
     proxy: {
+      // cell1 (dispense): /api/cell1/v1/... → :17054/v1/...
+      "/api/cell1": {
+        target: "http://localhost:17054",
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/api\/cell1/, ""),
+      },
+      // cell4 (weigh): /api/cell4/v1/... → :17060/v1/...
+      "/api/cell4": {
+        target: "http://localhost:17060",
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/api\/cell4/, ""),
+      },
+      // default (no base) — handy for a single-cell preview
       "/v1": {
         target: process.env.VITE_API_TARGET || "http://localhost:17054",
         changeOrigin: true,

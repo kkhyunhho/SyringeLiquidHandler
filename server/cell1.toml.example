@@ -1,0 +1,17 @@
+# cell1 (dispense) config. Copy to cell1.toml (gitignored).
+#   python -m server --config server/cell1.toml          # real hardware
+#   python -m server --config server/cell1.toml --fake    # dev, no hardware
+
+[pump]
+port = "1A86:7523"   # SY-01B CH340 USB-serial (VID:PID)
+syringe_uL = 125
+init_force = 2
+
+[stage]
+serial_x = "NTAM63XD" # FTDI serial of the X adapter; two Z auto-assigned
+z_coord_invert = true
+
+[server]
+host = "0.0.0.0"
+port = 17054
+log_level = "info"

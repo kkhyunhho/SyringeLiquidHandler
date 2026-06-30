@@ -1,0 +1,16 @@
+# cell4 (weigh) config. Copy to cell4.toml (gitignored).
+#   python -m server --cell weigh --config server/cell4.toml          # real
+#   python -m server --cell weigh --config server/cell4.toml --fake   # dev
+
+[linear]
+port = "/dev/ttyUSB0"   # MINAS A6 over RS485 (TI USB3410)
+
+[balance]
+# Omit `port` to auto-detect the Sartorius balance by vendor ID 0x24BC.
+# port = "24BC:0010"
+ambient = "very_unstable"
+
+[server]
+host = "0.0.0.0"
+port = 17060
+log_level = "info"

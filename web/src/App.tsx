@@ -75,7 +75,7 @@ import {
   ValveDiagram,
 } from "@/components/diagrams"
 import { Stat } from "@/components/widgets"
-import { type ApiClient, ApiError } from "@/lib/api"
+import { type ApiClient, ApiError, makeHttpClient } from "@/lib/api"
 import { CELLS, type CellDef } from "@/lib/cells"
 import { makeMockClient } from "@/lib/mockClient"
 
@@ -147,12 +147,16 @@ export default function App() {
   )
   const [selId, setSelId] = useState(CELLS[0].id)
 
-  // One mock client per cell (lazy), kept across re-renders.
+  // One client per cell (lazy), kept across re-renders: a real HTTP client
+  // bound to that cell's backend (via its proxy base) when mock is off, else
+  // an in-memory mock.
   const clientsRef = useRef<Map<string, ApiClient>>(new Map())
   const clientFor = (id: string): ApiClient => {
     let cl = clientsRef.current.get(id)
     if (!cl) {
-      cl = makeMockClient()
+      const def = CELLS.find((c) => c.id === id)
+      cl =
+        def && !def.mock ? makeHttpClient(def.base ?? "") : makeMockClient()
       clientsRef.current.set(id, cl)
     }
     return cl

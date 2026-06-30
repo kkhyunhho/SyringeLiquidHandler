@@ -11,7 +11,7 @@ env/
 .ruff_cache/
 
 # Server: real bench config (the .example is committed)
-server/slh.toml
+server/*.toml
 
 # Editor / OS
 .vscode/

@@ -107,6 +107,15 @@ def main(argv: list[str] | None = None) -> int:
         from fake_cell import FakeCell
 
         server_cfg = ServerConfig()
+        if args.config is not None and args.config.exists():
+            s = tomllib.loads(args.config.read_text(encoding="utf-8")).get(
+                "server", {}
+            )
+            server_cfg = ServerConfig(
+                host=s.get("host", "0.0.0.0"),
+                port=int(s.get("port", 17054)),
+                log_level=s.get("log_level", "info"),
+            )
         app = create_app(cell_factory=FakeCell)
         print(f"slh-server [FAKE] on {server_cfg.host}:{server_cfg.port}")
         uvicorn.run(
