@@ -774,6 +774,7 @@ export default function App() {
                     cells={DISPENSE_CELLS.map((c) => c.name)}
                     durMs={stageDurMs}
                     ease={stageEase}
+                    tickOffset={0.25}
                   />
                 </div>
               )}

@@ -196,6 +196,7 @@ export function LinearTrack({
   cells,
   durMs = 500,
   ease = "ease",
+  tickOffset = 0.5,
 }: {
   mm: number
   maxMm: number
@@ -203,13 +204,16 @@ export function LinearTrack({
   cells: string[]
   durMs?: number
   ease?: string
+  // where within each cell column the stop sits (0=left … 0.5=centre).
+  // Left-aligned gantries (~49% wide, flush left) centre near 0.25.
+  tickOffset?: number
 }) {
   const W = 600
   const H = 50 // thin + long
   const railY = 30
-  // Tick i sits at the SAME (i+0.5)/n fraction of the full width as cell i's
-  // centre in the gap-0 grid above, so the stops line up under the gantries.
-  const tickX = (i: number) => ((i + 0.5) / cells.length) * W
+  // Tick i sits at the SAME (i+tickOffset)/n width fraction as cell i's
+  // gantry centre in the grid above, so the stops line up under them.
+  const tickX = (i: number) => ((i + tickOffset) / cells.length) * W
   const x0 = tickX(0)
   const x1 = tickX(cells.length - 1)
   const frac = clamp(mm / maxMm, 0, 1)
