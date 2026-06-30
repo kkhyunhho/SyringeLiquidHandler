@@ -1,18 +1,48 @@
 # SyringeLiquidHandler
 
-Cross-project bench scripts that drive the **Runze SY-01B syringe pump**
-and the **Sartorius Entris-II balance** together for liquid-handling
-measurements. The pump (`sy01b`) and balance (`entris_ii`) drivers are
-`pip install -e`'d into the shared conda env **`sdl`**, so
-[`cv_mass_measurement.py`](cv_mass_measurement.py) imports them directly —
-no `sys.path` bootstrap.
+The Phase-1 **cell** project: hardware drivers composed behind a `Cell`
+interface, served over an L1 FastAPI `/v1` API, with a React web UI. It is
+the SDLClaude reference for two cell shapes:
 
-The optional XZ stage ([`xz_stage.py`](xz_stage.py)) uses the
-MKSServo57DCANController **standalone** MKS driver, which is not in `sdl`
-(its `mks_motor` import name collides with the full ESP32 driver); that one
-is added to `sys.path` from `../MKSServo57DCANController/src`.
+- **dispense cell** (cell1–3): syringe pump (`sy01b`) + XZ gantry (full
+  ESP32 `mks_motor`, paired-Z interlock).
+- **weigh cell** (cell4): MINAS A6 linear rail (`lmc`) + the single
+  Entris-II balance (`entris_ii`) that shuttles under cell1–3.
 
-## Scripts
+The original gravimetric-CV bench scripts ([`cv_mass_measurement.py`](cv_mass_measurement.py)
++ [`xz_stage.py`](xz_stage.py)) still live here too (documented below).
+
+## L1 server, cells & web
+
+```
+web (React, web/)  ──HTTP /v1──▶  server/ (FastAPI)  ──▶  Cell  ──▶  drivers ──▶ hardware
+```
+
+| Piece | What |
+|---|---|
+| [`cell_protocol.py`](cell_protocol.py) | the `Cell` interface + `CellError` hierarchy (→ HTTP status) |
+| [`dispense_cell.py`](dispense_cell.py) | `DispenseCell` — pump + XZ gantry (ESP32 `mks_motor`) |
+| [`weigh_cell.py`](weigh_cell.py) | `WeighCell` — MINAS A6 linear (`lmc`) + balance |
+| [`fake_cell.py`](fake_cell.py) | in-memory `FakeCell` for tests + `--fake` dev |
+| [`lmc.py`](lmc.py) | re-exports the MINAS A6 driver from `../LinearMotorController` |
+| [`server/`](server/) | `create_app` + `/v1` routes + schemas + error mapping + `__main__` |
+| [`web/`](web/) | the operator UI (one web for the whole Phase; cell switcher) |
+
+```bash
+# run a cell server (real hardware)
+python -m server --config server/cell1.toml                 # cell1 (dispense) :17054
+python -m server --cell weigh --config server/cell4.toml    # cell4 (weigh)    :17060
+# hardware-free dev (same contract, FakeCell):
+python -m server --config server/cell1.toml --fake
+python -m pytest tests/server/                              # 12 route tests, no hardware
+
+# web (dev): npm run dev in web/, open the forwarded :5173
+```
+
+Ports are per-cell (SDLClaude ARCHITECTURE.md): cell1=17054 … cell4=17060.
+The web proxies `/api/cell1`→17054 and `/api/cell4`→17060 (cell2/3 are mock).
+
+## Legacy bench scripts
 
 | File | Purpose |
 |---|---|

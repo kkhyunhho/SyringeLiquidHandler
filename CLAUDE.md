@@ -5,22 +5,24 @@ This file guides Claude Code (claude.ai/code) when working in the
 
 ## Overview
 
-Cross-project bench scripts that drive the **Runze SY-01B syringe pump**
-and the **Sartorius Entris-II balance** together for gravimetric
-liquid-handling measurements. This folder is the home for all combined
-pump + balance work; new such scripts go here.
+The Phase-1 **cell** project: device drivers composed behind a `Cell`
+interface, exposed over an L1 FastAPI `/v1` server, with a React web UI. Two
+cell shapes live here (the SDLClaude reference implementations):
 
-The scripts do **not** install the two device drivers — they import them
-directly from the sibling project repos via a `sys.path` bootstrap at the
-top of each script:
+- **dispense cell** (cell1–3): syringe pump (`sy01b`) + XZ gantry (the full
+  ESP32 `mks_motor`, paired-Z interlock). No balance.
+- **weigh cell** (cell4): MINAS A6 linear rail (`lmc`) + the **single**
+  Entris-II balance (`entris_ii`) that shuttles under cell1–3 to weigh each
+  dispense.
 
-- `../PrecisionScaleController/PrecisionScaleController/src` → `entris_ii`
-  (`PrecisionScaleController`)
-- `../SyringePumpController/src` → `sy01b` (`SyringePumpController`)
+The legacy standalone scripts (`cv_mass_measurement.py` + `xz_stage.py`) for
+the original gravimetric-CV bench still live here too.
 
-The folder may be renamed/moved as long as it stays **one level under the
-workspace root** (the bootstrap resolves paths from
-`Path(__file__).resolve().parents[1]`).
+All hardware drivers are imported from the **shared `sdl` env** (`sy01b`,
+`entris_ii`, `mks_motor` are `pip install -e`'d into it); `lmc` re-exports
+the flat `LinearMotorController` module from `../LinearMotorController` via
+`sys.path` (see `lmc.py`). (Self-containing the repo via packaging+pin is a
+tracked task.)
 
 ## Conventions
 
@@ -28,10 +30,6 @@ For shared conventions — code style, the `sdl` env, testing, terminology
 (**Level** = control-code depth; **Phase** = SDL hardware stage;
 composition = device → **cell** → Phase-system), and task/commit rules —
 see **SDLClaude** (`kkhyunhho/SDLClaude`), the single source of truth.
-
-This folder is a **cell**: it composes the pump (`sy01b`) and balance
-(`entris_ii`) drivers — both `pip install -e`'d into `sdl` — into a
-gravimetric liquid-handling measurement, with an optional XZ motion stage.
 Where this file is silent, SDLClaude governs.
 
 ## Files
