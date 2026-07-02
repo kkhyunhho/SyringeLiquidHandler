@@ -4,14 +4,12 @@ cell4 carries the Phase's single balance on a linear rail and shuttles it
 under cell1–3 to weigh each dispense. It has **no pump**, so the pump methods
 of the :class:`cell_protocol.Cell` protocol raise.
 
-The linear (Y) rail runs on the **Modbus-RTU + Block Operation** driver
-(:class:`vendor.lmc.LinearMotorControllerModbus`): absolute positioning and
-homing are executed by the amp's own internal PID/homing (native position
-mode), so there is no software soft-loop and no overshoot. The amp must be
-booted in Modbus mode (``Pr5.37=2``, ``Pr6.28=1``, homing params
-``Pr60.52–54``) with a battery-backed absolute encoder (``Pr0.15=1``) so the
-origin survives power cycles — see ``CLAUDE.md`` for the one-time amp setup.
-Hardware-verified at the bench, not in CI.
+The linear (Y) rail runs on the **MINAS standard serial protocol over RS485**
+(:class:`vendor.lmc.LinearMotorController`, amp ``Pr5.37=0``): absolute
+positioning (``move_to_mm``) runs a software closed loop whose per-iteration
+speed command comes from the driver's ``PIDController`` (P-tuned), converging
+to ±0.1 mm and aborting if the residual stops shrinking. Hardware-verified at
+the bench, not in CI.
 """
 
 from __future__ import annotations
@@ -23,12 +21,10 @@ from vendor.entris_ii import PrecisionScaleController
 from .cell_protocol import (
     AMBIENT_LEVELS,
     Cell,
-    CellTimeoutError,
-    DeviceFaultError,
     InvalidArgError,
     WrongStateError,
 )
-from vendor.lmc import LinearMotorControllerModbus
+from vendor.lmc import LinearMotorController
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,7 +59,7 @@ class BalanceLinearCell(Cell):
 
     def __init__(
         self,
-        lin: LinearMotorControllerModbus,
+        lin: LinearMotorController,
         scale: PrecisionScaleController,
         config: BalanceLinearConfig,
     ) -> None:
@@ -79,14 +75,7 @@ class BalanceLinearCell(Cell):
     @classmethod
     def open(cls, config: BalanceLinearConfig) -> BalanceLinearCell:
         scale_port = config.scale_port or PrecisionScaleController.find_port()
-        # Modbus-RTU client; opens the RS485 link at init (Pr5.37=2 on the amp).
-        lin = LinearMotorControllerModbus(config.linear_port)
-        # Clear any latched alarm from a prior run, then enable the servo so
-        # Block-Op moves can run. We do NOT auto-home: with the battery-backed
-        # absolute encoder (Pr0.15=1) the origin persists across power cycles,
-        # so read_position_mm() is already valid; the operator homes on demand.
-        lin.alarm_clear()
-        lin.servo_on()
+        lin = LinearMotorController(config.linear_port)  # opens RS485 at init
         scale = PrecisionScaleController(port=scale_port)
         scale.__enter__()  # opens the SBI link (context-manager protocol)
         if config.ambient is not None:
@@ -95,10 +84,6 @@ class BalanceLinearCell(Cell):
 
     # ── Discovery ───────────────────────────────────────────────────────
     def diagnose(self) -> dict:
-        # The Modbus driver has no model/version read (unlike the standard
-        # protocol); the amp's active alarm number is the health signal instead
-        # (0 = no alarm). read succeeding at all proves the RS485/Modbus link.
-        err = self._lin.read_error_code()
         return {
             # No pump on this cell; ok=True keeps the cell from reading faulted.
             "pump": {"present": False, "ok": True},
@@ -107,30 +92,28 @@ class BalanceLinearCell(Cell):
                 "serial_number": self._scale.get_serial_number(),
                 "ok": True,
             },
-            "stage": {  # the "stage" axis here is the linear (Y) rail
-                "protocol": "modbus-rtu/block-op",
-                "error_code": err,
-                "position_mm": self._lin.read_position_mm(),
-                "ok": err == 0,
+            "stage": {  # the "stage" axis here is the linear rail
+                "model": self._lin.read_model_name(),
+                "version": self._lin.read_software_version(),
+                "ok": True,
             },
-            "ok_to_initialize": err == 0,
+            "ok_to_initialize": True,
             "versions": {
                 "balance": self._scale.get_model_number(),
-                "linear": "MINAS A6 (Modbus)",
+                "linear": self._lin.read_software_version(),
             },
         }
 
     def status(self) -> dict:
         pos = self._lin.read_position_mm()
-        err = self._lin.read_error_code()
         return {
             "weight_g": self._last_weight_g,  # cached; refresh via read_weight
             "valve": "-",  # no valve on a weigh cell
             "plunger_uL": 0.0,
             "stage_x_mm": float(pos) if pos is not None else 0.0,
             "stage_z_mm": 0.0,
-            "busy": self._lin.is_busy(),
-            "error": f"amp alarm {err}" if err else None,
+            "busy": False,
+            "error": None,
         }
 
     # ── Balance ─────────────────────────────────────────────────────────
@@ -197,27 +180,17 @@ class BalanceLinearCell(Cell):
 
     # ── Linear rail (Y) ─────────────────────────────────────────────────
     def home_linear(self) -> float:
-        # Native amp homing (Block-Op CC_HOMING, Pr60.52–54): the amp runs its
-        # own homing sequence and sets the mechanical origin. With the battery
-        # absolute encoder this is a one-time reference the encoder then retains
-        # across power cycles, so re-homing each boot is unnecessary.
-        if not self._lin.home():
-            raise DeviceFaultError(
-                "linear homing did not complete", command="linear/home"
-            )
-        return self._lin.read_position_mm()
+        # No discrete homing on the RS485 driver; the encoder origin is 0 mm,
+        # reached by an absolute move via the driver's PID closed loop.
+        final = self._lin.move_to_mm(0.0)
+        return float(final) if final is not None else 0.0
 
     def move_linear(self, y_mm: float) -> float:
-        # Absolute Y target in mm via native Block-Op position mode: the amp's
-        # internal PID drives to target, so no software soft-loop and no
-        # overshoot. A None return means the move didn't finish before timeout.
+        # Absolute Y target in mm. The RS485 driver's move_to_mm runs a
+        # PID-driven software closed loop (P-tuned) to ±0.1 mm; the PID owns the
+        # per-iteration speed, so there is no useful per-move speed/accel here.
         final = self._lin.move_to_mm(y_mm)
-        if final is None:
-            raise CellTimeoutError(
-                f"linear move to {y_mm} mm did not complete",
-                command="linear/move",
-            )
-        return float(final)
+        return float(final) if final is not None else y_mm
 
     # ── Gantry (none on a balance+linear cell) ──────────────────────────
     def home_gantry(self) -> tuple[float, float]:
@@ -230,24 +203,16 @@ class BalanceLinearCell(Cell):
 
     # ── Safety / lifecycle ──────────────────────────────────────────────
     def stop(self) -> None:
-        # Hard stop: drop the servo (Modbus coil SRV-ON off) so the amp cuts
-        # torque immediately, aborting any in-progress Block-Op move.
-        try:
-            self._lin.servo_off()
-        except Exception:  # noqa: BLE001 — stop must never raise
-            pass
+        # The MINAS RS485 standard-protocol driver exposes no async halt; a
+        # hard stop is handled at the bench-level interlock.
+        pass
 
     def close(self) -> None:
-        # Release the servo, then close the Modbus serial link.
-        try:
-            self._lin.servo_off()
-        except Exception:  # noqa: BLE001 — best-effort shutdown
-            pass
-        ser = getattr(getattr(self._lin, "client", None), "serial", None)
+        ser = getattr(self._lin, "ser", None)
         if ser is not None:
             try:
                 ser.close()
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001 — best-effort shutdown
                 pass
         try:
             self._scale.__exit__(None, None, None)

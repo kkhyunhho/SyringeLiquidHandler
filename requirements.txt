@@ -4,14 +4,14 @@
 # Fully self-contained: ALL hardware drivers are vendored in-repo under
 # vendor/ (sy01b, entris_ii, mks_motor, lmc all as packages), so
 # a fresh `pip install -r requirements.txt` needs no GitHub access or sibling
-# clones. Only the drivers' runtime deps are pulled from PyPI below. See
+# clones. Only the drivers' runtime deps (pyserial, pyftdi) are pulled from
+# PyPI below. See
 # vendor/VENDORED.md for each package's upstream source + commit; update a
 # driver by re-copying its source into vendor/ and bumping VENDORED.md.
 
 # ── Transports / libs the vendored drivers + cell need ─────────────────────
-pyserial>=3.5      # pump (sy01b), balance (entris_ii), linear (lmc) over serial
-pyftdi>=0.55       # XZ gantry (mks_motor) over FTDI USB2CAN
-minimalmodbus>=2.1 # linear rail (lmc Modbus-RTU + Block-Op variant, cell4)
+pyserial>=3.5    # pump (sy01b), balance (entris_ii), linear (lmc) over serial
+pyftdi>=0.55     # XZ gantry (mks_motor) over FTDI USB2CAN
 
 # ── L1 /v1 server (server/) ────────────────────────────────────────────────
 fastapi>=0.115        # /v1 app + pydantic schemas

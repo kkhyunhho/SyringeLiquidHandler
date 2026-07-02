@@ -7,19 +7,90 @@ Communicate using the MINAS standard serial protocol
 (ENQ/EOT/ACK/NAK handshaking) at 9600 bps, 8N1.
 """
 
-import serial
+import sys
 import time
+
+import serial
+
+
+class PIDController:
+    """Discrete-time PID with anti-windup and EMA-filtered derivative."""
+
+    # Tunables exposed as class attributes per LearnedPatterns §3.
+    kp = 4.0
+    ki = 0.0
+    kd = 0.0
+    output_min = 1
+    output_max = 25
+    deadband_mm = 0.0
+    derivative_alpha = 0.2
+
+    def __init__(self, kp=None, ki=None, kd=None):
+        if kp is not None:
+            self.kp = kp
+        if ki is not None:
+            self.ki = ki
+        if kd is not None:
+            self.kd = kd
+        self.reset()
+
+    def reset(self):
+        """Clear integrator, previous error, and filtered derivative."""
+        self._integral = 0.0
+        self._prev_error = None
+        self._filtered_derivative = 0.0
+
+    def compute(self, error_mm, dt_s):
+        """Return signed output in r/min plus the P, I, D terms.
+
+        The output sign tracks the error sign; the caller passes
+        abs(output) as the speed to move_relative_mm, which auto-signs
+        direction from the displacement.
+
+        Args:
+            error_mm -- target minus current position in mm
+            dt_s -- seconds elapsed since the previous compute call
+
+        Return (signed_output_r_per_min, p_term, i_term, d_term).
+        """
+        p_term = self.kp * error_mm
+
+        if self._prev_error is None:
+            raw_d = 0.0
+        else:
+            raw_d = (error_mm - self._prev_error) / max(dt_s, 1e-3)
+        self._filtered_derivative = (
+            self.derivative_alpha * raw_d
+            + (1.0 - self.derivative_alpha) * self._filtered_derivative
+        )
+        d_term = self.kd * self._filtered_derivative
+
+        # Conditional anti-windup: skip integration if doing it would
+        # push the output further into same-sign saturation.
+        unclamped = p_term + self.ki * self._integral + d_term
+        same_sign_saturated = (
+            unclamped > self.output_max and error_mm > 0
+        ) or (unclamped < -self.output_max and error_mm < 0)
+        if not same_sign_saturated:
+            self._integral += error_mm * dt_s
+        i_term = self.ki * self._integral
+
+        output = p_term + i_term + d_term
+        sign = 1 if output >= 0 else -1
+        magnitude = min(abs(output), float(self.output_max))
+        if abs(error_mm) <= self.deadband_mm:
+            magnitude = 0.0
+        elif magnitude < self.output_min:
+            magnitude = float(self.output_min)
+
+        self._prev_error = error_mm
+        return sign * magnitude, p_term, i_term, d_term
 
 
 class LinearMotorController:
     # Magnetic linear encoder: 1 um/pulse -> 1000 pulses/mm.
     # Adjust after empirical calibration if needed.
     pulses_per_mm = 1000
-
-    # Speed schedule (r/min) used by move_to_mm(). The first entry
-    # is the coarse approach speed; later entries shrink overshoot
-    # toward tolerance_mm. Edit here to change move_to_mm speeds.
-    move_to_mm_speed_schedule = [50, 10, 3, 1, 1]
 
     def __init__(self, port: str):
         """Initialize serial port with 8N1 MINAS standard settings."""
@@ -451,15 +522,12 @@ class LinearMotorController:
     ) -> float | None:
         """Move to an absolute target position in millimeters.
 
-        Implement a software closed loop on top of
-        move_relative_mm(): shrink the residual error by
-        iterating moves at progressively lower speeds so
-        speed-mode overshoot collapses into tolerance_mm.
-
-        Speeds come from the class attribute
-        ``move_to_mm_speed_schedule`` (default
-        [50, 10, 3, 1, 1] r/min). Edit that attribute to
-        retune speeds without changing call sites.
+        Implement a software closed loop on top of move_relative_mm():
+        a PIDController computes the per-iteration speed command from
+        the position error so speed-mode overshoot collapses into
+        tolerance_mm. The controller is tuned to a P-controller; edit
+        the PIDController class attributes (kp / ki / kd / output_max
+        ...) to retune without changing call sites.
 
         Abort early if the residual error stops decreasing
         (convergence stalled) or max_iterations is reached.
@@ -472,8 +540,6 @@ class LinearMotorController:
 
         Return the final position in mm, or None on failure.
         """
-        min_pulse_step = 1
-
         current_mm = self.read_position_mm()
         if current_mm is None:
             return None
@@ -487,19 +553,23 @@ class LinearMotorController:
             print("  Already within tolerance; no motion issued.")
             return current_mm
 
+        pid = PIDController()
         prev_abs_error = abs(error_mm)
-        schedule = self.move_to_mm_speed_schedule
-        for i in range(min(max_iterations, len(schedule))):
-            speed = schedule[i]
-            pulse_step = abs(error_mm) * self.pulses_per_mm
-            if pulse_step < min_pulse_step:
-                print(
-                    f"  iter {i + 1}: residual {error_mm:+.4f} mm"
-                    f" < 1 pulse; stop."
-                )
-                break
+        prev_time = time.time()
+        for iteration in range(max_iterations):
+            now = time.time()
+            dt = now - prev_time
+            prev_time = now
+            out_signed, _, _, _ = pid.compute(error_mm, dt)
+            speed = int(round(abs(out_signed)))
+            if speed <= 0:
+                print(f"  iter {iteration + 1}: within deadband; stop.")
+                return current_mm
 
-            print(f"  iter {i + 1}: move {error_mm:+.3f} mm @ speed {speed}")
+            print(
+                f"  iter {iteration + 1}: move {error_mm:+.3f} mm"
+                f" @ speed {speed} r/min"
+            )
             result = self.move_relative_mm(
                 error_mm,
                 speed=speed,
@@ -507,7 +577,7 @@ class LinearMotorController:
                 timeout=timeout_per_step,
             )
             if result is None:
-                print(f"  iter {i + 1}: move_relative_mm failed.")
+                print(f"  iter {iteration + 1}: move_relative_mm failed.")
                 return None
 
             current_mm = self.read_position_mm()
@@ -515,7 +585,8 @@ class LinearMotorController:
                 return None
             error_mm = target_mm - current_mm
             print(
-                f"  iter {i + 1}: now {current_mm} mm, error {error_mm:+.4f} mm"
+                f"  iter {iteration + 1}: now {current_mm} mm,"
+                f" error {error_mm:+.4f} mm"
             )
 
             if abs(error_mm) <= tolerance_mm:
@@ -538,8 +609,15 @@ class LinearMotorController:
 
 
 def main():
-    """Run a simple motor movement test scenario."""
-    serial_port = "/dev/ttyUSB0"
+    """Run a simple motor movement test scenario.
+
+    Use the serial port given as the first CLI argument, or fall
+    back to the default below. Port numbering changes across USB
+    re-enumeration; run claude_test/probe_ports.py to locate the
+    amp when the default port does not answer.
+    """
+    default_serial_port = "/dev/ttyUSB3"
+    serial_port = sys.argv[1] if len(sys.argv) > 1 else default_serial_port
     test_distance_mm = 40.0
     test_speed = 100
     test_iterations = 3

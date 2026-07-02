@@ -41,7 +41,7 @@ Where this file is silent, SDLClaude governs.
 | `cell/cell_protocol.py` | `Cell` protocol + `CellError` hierarchy the server maps to HTTP. |
 | `cell/pump_gantry_cell.py` | `PumpGantryCell` (cell1–3) — pump (`sy01b`) + XZ gantry (ESP32 `mks_motor`, paired-Z interlock), no balance. |
 | `cell/balance_linear_cell.py` | `BalanceLinearCell` — real cell4: MINAS A6 linear rail (`lmc`) + Entris-II balance, no pump. Run with `python -m server --config server/cell4.toml` (shape auto-detected from the `[linear]` table). |
-| `vendor/lmc/` | Codename `lmc` package — VID:PID-resolving shim (`__init__.py`) over two vendored MINAS A6 raw drivers: `linear_motor_controller_modbus.py` (Modbus + Block-Op, **cell4 uses this**) and `linear_motor_controller.py` (legacy standard protocol). Imported as `vendor.lmc`. |
+| `vendor/lmc/` | Codename `lmc` package — VID:PID-resolving shim (`__init__.py`) over the vendored MINAS A6 raw driver (`linear_motor_controller.py`, RS485 standard protocol with a PID closed loop); imported as `vendor.lmc`. |
 | `server/` | FastAPI **L1 `/v1` server** — thin HTTP bridge over the cell (mirrors `sy01b-server`). |
 | `vendor/` | All hardware drivers vendored in-repo (`sy01b`, `entris_ii`, `mks_motor`, `linear_motor_controller`); see `vendor/VENDORED.md` for sources/commits. |
 | `README.md` | User-facing usage + bench notes. |
@@ -103,29 +103,16 @@ The Entris-II must be in SBI mode with stable-weight auto-push before a run
 balance returning `0x15` (NAK) to SBI commands is in xBPI mode — wrong
 interface menu. SBI serial defaults: 9600 / ODD / 8 / 1.
 
-### MINAS A6 amp prerequisites (Modbus + absolute encoder)
+### MINAS A6 amp prerequisites (linear rail)
 
-The linear (Y) rail runs on the **Modbus-RTU + Block-Operation** driver
-(`vendor.lmc.LinearMotorControllerModbus`), so the amp must be booted in that
-mode — the amp speaks only one protocol at a time, chosen at boot by `Pr5.37`.
-One-time front-panel setup, then **EEPROM-save + power-cycle**:
-
-- `Pr5.37 = 2` — RS485 Modbus-RTU (1:N). (`0` = the legacy standard-protocol
-  driver `LinearMotorController`, kept only as fallback.)
-- `Pr6.28 = 1` — Block Operation, Modbus-triggered.
-- `Pr60.52 / Pr60.53 / Pr60.54` — homing speeds + accel (used by `home()` →
-  Block-Op `CC_HOMING`).
-- `Pr0.15 = 1` — **battery-backed absolute encoder** mode. With the encoder
-  battery installed and a one-time encoder clear (Enc-Clr, which also clears
-  the multiturn-overflow alarm), the origin **persists across power cycles**,
-  so `BalanceLinearCell.open()` does *not* re-home each boot — `read_position_mm()`
-  is already absolute. `home_linear()` sets the mechanical origin once.
-
-Modbus serial: 9600 / 8N1 (driver default; matches the RS485 link after
-`Pr5.37` is flipped). A move now runs the amp's **internal PID position mode**
-(native Block-Op), so there is no software soft-loop and no overshoot — the
-reason for the switch. Until the amp is reconfigured as above, cell4 cannot be
-brought up.
+The linear (Y) rail runs on the **MINAS standard serial protocol over RS485**
+(`vendor.lmc.LinearMotorController`), not Modbus. Amp parameters: `Pr5.37 = 0`
+(standard protocol), `Pr5.30 = 2` (9600 bps), `Pr5.31 = 1` (slave ID); serial
+9600 / 8N1. `move_to_mm` runs a software closed loop whose per-iteration speed
+is set by the driver's `PIDController` (P-tuned; see `linear_motor_controller.py`
+`class PIDController`), converging to ±0.1 mm and aborting if the residual
+stops shrinking — this replaced the earlier fixed step schedule and fixes the
+overshoot without switching to Modbus.
 
 ## Folder-specific rules
 
