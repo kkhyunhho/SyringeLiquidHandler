@@ -5,9 +5,8 @@ pump (``sy01b``), the balance (``entris_ii``), and the XZ stage. Two
 implementations satisfy the :class:`Cell` protocol:
 
 * :class:`PumpGantryCell` / :class:`BalanceLinearCell` — real drivers
-  (vendored), opened at the bench.
-* ``FakeCell`` (tests/server/conftest.py) — in-memory, for tests and for
-  serving the web UI without hardware.
+  (vendored), opened at the bench. (Verification is hardware-in-the-loop;
+  there is no in-memory fake.)
 
 Every device fault surfaces as a :class:`CellError` subclass so the server
 maps it to a stable HTTP status + JSON envelope (see ``server/errors.py``).
@@ -64,7 +63,8 @@ AMBIENT_LEVELS = ("very_stable", "stable", "unstable", "very_unstable")
 
 @runtime_checkable
 class Cell(Protocol):
-    """Interface the /v1 routes call. Implemented by PumpGantryCell + FakeCell.
+    """Interface the /v1 routes call. Implemented by PumpGantryCell and
+    BalanceLinearCell.
 
     All methods are synchronous and blocking; the server runs them in a
     worker thread under a single ``asyncio.Lock`` (one command in flight).
@@ -74,6 +74,7 @@ class Cell(Protocol):
     def status(self) -> dict: ...
     # Balance
     def tare(self) -> float: ...
+    def calibrate(self) -> float: ...
     def read_weight(self) -> tuple[float, bool]: ...
     def set_ambient(self, level: str) -> str: ...
     # Pump
@@ -89,11 +90,16 @@ class Cell(Protocol):
         source_port: int,
         dispense_port: int,
     ) -> dict: ...
-    # Stage
-    def home_stage(self) -> tuple[float, float]: ...
-    def move_stage(
+    # Gantry actions (XZ, 2 axes + speed/accel) — pump+gantry cells
+    def home_gantry(self) -> tuple[float, float]: ...
+    def move_gantry(
         self, x_mm: float, z_mm: float, *, speed_pct: int, accel_pct: int
     ) -> tuple[float, float]: ...
+    # Linear actions (Y rail, 1 axis; the driver owns the speed profile) —
+    # balance+linear cells. A separate action set from the gantry on purpose:
+    # different motor, axis, and wire protocol (see ARCHITECTURE.md).
+    def home_linear(self) -> float: ...
+    def move_linear(self, y_mm: float) -> float: ...
     # Safety / lifecycle
     def stop(self) -> None: ...
     def close(self) -> None: ...

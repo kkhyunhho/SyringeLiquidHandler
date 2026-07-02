@@ -1,6 +1,5 @@
 # cell4 (balance + linear) config. Copy to cell4.toml (gitignored).
-#   python -m server --cell balance_linear --config server/cell4.toml        # real
-#   python -m server --cell balance_linear --config server/cell4.toml --fake # dev
+#   python -m server --config server/cell4.toml          # real (cell auto-detected)
 
 [linear]
 # MINAS A6 over RS485 via Moxa UPort 1150. "VID:PID" is resolved at runtime

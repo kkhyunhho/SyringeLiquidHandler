@@ -17,7 +17,7 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 
-from vendor.mks_motor import MKSMotor
+from vendor.mks_motor import MKSMotor, prepare_usb_nodes, release_ftdi_sio
 from vendor.sy01b import SyringePumpController
 
 from .cell_protocol import Cell, DeviceFaultError, WrongStateError
@@ -46,7 +46,22 @@ class Config:
 
 
 def _no_balance() -> WrongStateError:
-    return WrongStateError("dispense cell has no balance", command="balance")
+    # Defensive stub: this cell has no balance, but the `Cell` protocol
+    # requires every method, so the balance methods raise this instead of
+    # crashing. In normal use the web reads `diagnose()` balance.present=false
+    # and greys those controls out — this only fires on a stray/buggy call
+    # (→ HTTP 409). The stage methods, by contrast, ARE implemented (they
+    # drive the gantry); only the balance group is absent here.
+    return WrongStateError("pump+gantry cell has no balance", command="balance")
+
+
+def _no_linear() -> WrongStateError:
+    # Defensive stub: motion here is the XZ gantry (gantry action set), not a
+    # linear rail — the linear methods raise so a misdirected /v1/linear/* call
+    # gets a clean 409 instead of hitting the gantry.
+    return WrongStateError(
+        "pump+gantry cell has no linear rail", command="linear"
+    )
 
 
 class PumpGantryCell(Cell):
@@ -80,6 +95,12 @@ class PumpGantryCell(Cell):
             reply_timeout_s=2.0,
         )
         pump = SyringePumpController.open(pump_cfg)
+        # Docker /dev is a private tmpfs and ftdi_sio re-claims the FTDI
+        # adapters on every enumeration; rebuild the USB nodes and detach
+        # ftdi_sio so pyftdi can open the USB2CAN adapters (mirrors bridge.py).
+        # Both are no-ops on non-Linux and touch only FTDI adapters — no motion.
+        prepare_usb_nodes()
+        release_ftdi_sio()
         # Opens all three USB2CAN adapters by serial (X explicit, two Z auto).
         za, zb, x = MKSMotor.open_xz(
             config.motor_serial_x, z_coord_invert=config.z_coord_invert
@@ -129,6 +150,9 @@ class PumpGantryCell(Cell):
 
     # ── Balance (none on a dispense cell) ───────────────────────────────
     def tare(self) -> float:
+        raise _no_balance()
+
+    def calibrate(self) -> float:
         raise _no_balance()
 
     def read_weight(self) -> tuple[float, bool]:
@@ -200,7 +224,7 @@ class PumpGantryCell(Cell):
         MKSMotor.move_sync([self._x], [(target, sp, ac)])
         self._stage_x_mm = target
 
-    def home_stage(self) -> tuple[float, float]:
+    def home_gantry(self) -> tuple[float, float]:
         MKSMotor.home_xz(
             self._z_motors, self._x, self._cfg.home_dir_z, self._cfg.home_dir_x
         )
@@ -208,7 +232,7 @@ class PumpGantryCell(Cell):
         self._stage_z_mm = 0.0
         return (0.0, 0.0)
 
-    def move_stage(
+    def move_gantry(
         self, x_mm: float, z_mm: float, *, speed_pct: int, accel_pct: int
     ) -> tuple[float, float]:
         # up → X → down (never diagonal). If X is unchanged, drop Z straight.
@@ -219,6 +243,13 @@ class PumpGantryCell(Cell):
             self._move_x(x_mm, speed_pct, accel_pct)  # X
             self._move_z(z_mm, speed_pct, accel_pct)  # down
         return (self._stage_x_mm, self._stage_z_mm)
+
+    # ── Linear rail (none on a pump+gantry cell) ────────────────────────
+    def home_linear(self) -> float:
+        raise _no_linear()
+
+    def move_linear(self, y_mm: float) -> float:
+        raise _no_linear()
 
     # ── Safety / lifecycle ──────────────────────────────────────────────
     def stop(self) -> None:

@@ -71,6 +71,15 @@ def _load_balance_linear(path: Path) -> tuple[BalanceLinearConfig, ServerConfig]
     return bl_cfg, server_cfg
 
 
+def _infer_cell(path: Path) -> str:
+    """Pick the cell shape from the config's tables so `--config` alone selects
+    it. A ``[linear]`` (or ``[balance]``) table → ``balance_linear`` (cell4);
+    otherwise ``pump_gantry`` (cell1–3). ``--cell`` overrides this."""
+    raw = tomllib.loads(path.read_text(encoding="utf-8"))
+    has_bl = "linear" in raw or "balance" in raw
+    return "balance_linear" if has_bl else "pump_gantry"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="slh-server")
     parser.add_argument(
@@ -85,48 +94,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--cell",
         choices=("pump_gantry", "balance_linear"),
-        default="pump_gantry",
+        default=None,
         help=(
-            "Which cell shape this server serves: 'pump_gantry' (cell1–3: pump "
-            "+ XZ gantry, default) or 'balance_linear' (cell4: MINAS A6 linear "
-            "rail + balance)."
-        ),
-    )
-    parser.add_argument(
-        "--fake",
-        action="store_true",
-        help=(
-            "Run against the in-memory FakeCell instead of real hardware — "
-            "for web development and exercising the /v1 contract. Ignores "
-            "--config; serves on host/port from [server] if a config exists, "
-            "else 0.0.0.0:17054."
+            "Cell shape to serve. Omit to auto-detect from the config: a "
+            "[linear] table → 'balance_linear' (cell4), otherwise 'pump_gantry' "
+            "(cell1–3). Pass explicitly only to override the inference."
         ),
     )
     args = parser.parse_args(argv)
-
-    if args.fake:
-        from cell.fake_cell import FakeCell
-
-        server_cfg = ServerConfig()
-        if args.config is not None and args.config.exists():
-            s = tomllib.loads(args.config.read_text(encoding="utf-8")).get(
-                "server", {}
-            )
-            server_cfg = ServerConfig(
-                host=s.get("host", "0.0.0.0"),
-                port=int(s.get("port", 17054)),
-                log_level=s.get("log_level", "info"),
-            )
-        app = create_app(cell_factory=FakeCell)
-        print(f"slh-server [FAKE] on {server_cfg.host}:{server_cfg.port}")
-        uvicorn.run(
-            app,
-            host=server_cfg.host,
-            port=server_cfg.port,
-            log_level=server_cfg.log_level,
-            timeout_keep_alive=120,
-        )
-        return 0
 
     if args.config is not None:
         cfg_path = args.config
@@ -138,7 +113,8 @@ def main(argv: list[str] | None = None) -> int:
     if not cfg_path.exists():
         parser.error(f"config file not found: {cfg_path}")
 
-    if args.cell == "balance_linear":
+    cell_kind = args.cell or _infer_cell(cfg_path)
+    if cell_kind == "balance_linear":
         bl_cfg, server_cfg = _load_balance_linear(cfg_path)
         factory = lambda: BalanceLinearCell.open(bl_cfg)  # noqa: E731
     else:

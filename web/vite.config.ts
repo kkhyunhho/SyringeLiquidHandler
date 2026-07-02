@@ -13,7 +13,7 @@ export default defineConfig({
   },
   // Dev: forward each cell's API to its /v1 server (same-origin, no CORS).
   // Per-cell bases (cells.ts) map to per-cell ports; "/v1" stays as a default.
-  // Run a server (real, or `python -m server [--cell weigh] --fake`) per port.
+  // Run a cell server (`python -m server --config server/cellN.toml`) per port.
   server: {
     host: true, // bind 0.0.0.0 so VSCode forwarding / NUC-IP access works
     allowedHosts: true, // accept forwarded/tunnel Host headers

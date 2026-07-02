@@ -1,5 +1,11 @@
 # SyringeLiquidHandler /v1 server config. Copy to slh.toml (gitignored) and
 # edit for the bench. Ports accept a device path or a "VID:PID" hex string.
+#
+# This file lists EVERY section for reference. A real cell config keeps only
+# ONE shape's sections: [pump]+[stage] for a pump+gantry cell (cell1–3), or
+# [linear]+[balance] for a balance+linear cell (cell4). The server auto-detects
+# the shape from the config (a [linear] table → balance+linear), so
+# `python -m server --config <file>` alone is enough — see cell1/cell4.toml.example.
 
 [pump]
 port = "1A86:7523"   # SY-01B CH340 USB-serial (VID:PID), or e.g. "/dev/ttyUSB1"
@@ -17,8 +23,9 @@ z_coord_invert = true
 # home_dir_z = 0       # flip 0<->1 to home off the opposite end
 # home_dir_x = 0
 
-# Weigh cell (cell4) only — used with `python -m server --cell weigh`:
-# the MINAS A6 linear rail (codename `lmc`) over RS485 + the balance.
+# Balance+linear cell (cell4) sections — the MINAS A6 linear rail (codename
+# `lmc`) over RS485 + the balance. Include these (and drop [pump]/[stage])
+# for a cell4 config; their presence auto-selects the balance+linear shape.
 [linear]
 port = "/dev/ttyUSB0"
 

@@ -45,6 +45,16 @@ export function makeMockClient(): ApiClient {
       s.weight_g = 0
       return { weight_g: 0 }
     },
+    calibrate: async () => {
+      // isoCAL / internal calibration: empty-pan zero baseline.
+      s.weight_g = 0
+      return { weight_g: 0 }
+    },
+    weight: async () => {
+      // Mock a small settled reading so the button visibly does something.
+      s.weight_g = Math.round((Math.random() * 2 + 0.05) * 1000) / 1000
+      return { weight_g: s.weight_g, stable: true }
+    },
     ambient: async (level: string) => ({ level }),
     initialize: async () => {
       s.initialized = true
@@ -74,12 +84,12 @@ export function makeMockClient(): ApiClient {
       s.plunger_uL = 0
       return { cycles_done: cycles, final_valve: s.valve }
     },
-    stageHome: async () => {
+    gantryHome: async () => {
       s.x_mm = 0
       s.z_mm = 0
       return { x_mm: 0, z_mm: 0 }
     },
-    stageMove: async (
+    gantryMove: async (
       x_mm: number,
       z_mm: number,
       _speed_pct: number,
@@ -88,6 +98,14 @@ export function makeMockClient(): ApiClient {
       s.x_mm = x_mm
       s.z_mm = z_mm
       return { x_mm, z_mm }
+    },
+    linearHome: async () => {
+      s.x_mm = 0
+      return { y_mm: 0 }
+    },
+    linearMove: async (y_mm: number) => {
+      s.x_mm = y_mm
+      return { y_mm }
     },
     stop: async () => ({ stopped: true }),
   }

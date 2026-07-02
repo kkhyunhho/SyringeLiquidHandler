@@ -25,7 +25,6 @@ web (React, web/)  ──HTTP /v1──▶  server/ (FastAPI)  ──▶  Cell  
 | [`cell/cell_protocol.py`](cell/cell_protocol.py) | the `Cell` interface + `CellError` hierarchy (→ HTTP status) |
 | [`cell/pump_gantry_cell.py`](cell/pump_gantry_cell.py) | `PumpGantryCell` — pump + XZ gantry (ESP32 `mks_motor`) |
 | [`cell/balance_linear_cell.py`](cell/balance_linear_cell.py) | `BalanceLinearCell` — MINAS A6 linear (`lmc`) + balance |
-| [`cell/fake_cell.py`](cell/fake_cell.py) | in-memory `FakeCell` for tests + `--fake` dev |
 | [`vendor/lmc/`](vendor/lmc/) | codename `lmc` — VID:PID shim over the vendored MINAS A6 raw driver |
 | [`server/`](server/) | `create_app` + `/v1` routes + schemas + error mapping + `__main__` |
 | [`web/`](web/) | the operator UI (one web for the whole SDL; cell switcher) |
@@ -34,10 +33,7 @@ web (React, web/)  ──HTTP /v1──▶  server/ (FastAPI)  ──▶  Cell  
 ```bash
 # run a cell server (real hardware)
 python -m server --config server/cell1.toml                          # cell1 (pump+gantry)    :17054
-python -m server --cell balance_linear --config server/cell4.toml    # cell4 (balance+linear) :17060
-# hardware-free dev (same contract, FakeCell):
-python -m server --config server/cell1.toml --fake
-python -m pytest tests/server/                                       # route tests, no hardware
+python -m server --config server/cell4.toml                          # cell4 (balance+linear) :17060
 
 # web (dev): npm run dev in web/, open the forwarded :5173
 ```

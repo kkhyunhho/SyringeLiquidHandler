@@ -17,8 +17,8 @@ export interface CellDef {
 }
 
 // Phase-1 (this NUC). Balance lives on cell4 (shuttles under cell1–3).
-// cell1 (:17054) and cell4 (:17060) have real backends; run a server (real,
-// or `--fake` for dev) on each port. cell2/3 have no hardware yet → mock.
+// cell1 (:17054) and cell4 (:17060) have real backends; run a cell server on
+// each port. cell2/3 have no hardware yet → browser-side mock (mockClient).
 export const CELLS: CellDef[] = [
   { id: "cell1", name: "Cell 1", sub: "XZ gantry + pump", kind: "dispense", mock: false, base: "/api/cell1" },
   { id: "cell2", name: "Cell 2", sub: "XZ gantry + pump", kind: "dispense", mock: true },

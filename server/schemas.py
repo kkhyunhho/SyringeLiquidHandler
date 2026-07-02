@@ -106,19 +106,30 @@ class CycleResponse(BaseModel):
     final_valve: str
 
 
-# ── Stage ──────────────────────────────────────────────────────────────────
+# ── Gantry (XZ) ──────────────────────────────────────────────────────────────
 
 
-class StageMoveRequest(BaseModel):
+class GantryMoveRequest(BaseModel):
     x_mm: float = Field(ge=0)
     z_mm: float = Field(ge=0)
     speed_pct: int = Field(default=20, ge=1, le=100)
     accel_pct: int = Field(default=10, ge=1, le=100)
 
 
-class StageResponse(BaseModel):
+class GantryResponse(BaseModel):
     x_mm: float
     z_mm: float
+
+
+# ── Linear (Y) ───────────────────────────────────────────────────────────────
+
+
+class LinearMoveRequest(BaseModel):
+    y_mm: float = Field(ge=0)
+
+
+class LinearResponse(BaseModel):
+    y_mm: float
 
 
 # ── Safety ─────────────────────────────────────────────────────────────────

@@ -1,6 +1,5 @@
 # cell1 (pump + gantry) config. Copy to cell1.toml (gitignored).
 #   python -m server --config server/cell1.toml          # real hardware
-#   python -m server --config server/cell1.toml --fake    # dev, no hardware
 
 [pump]
 port = "1A86:7523"   # SY-01B CH340 USB-serial (VID:PID)

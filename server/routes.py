@@ -24,8 +24,10 @@ from server.schemas import (
     InitializeRequest,
     InitializeResponse,
     PlungerResponse,
-    StageMoveRequest,
-    StageResponse,
+    GantryMoveRequest,
+    GantryResponse,
+    LinearMoveRequest,
+    LinearResponse,
     StatusResponse,
     StopResponse,
     ValveRequest,
@@ -114,6 +116,19 @@ async def tare(request: Request) -> WeightResponse:
     cell = _cell(request)
     async with request.app.state.lock:
         weight_g = await run_in_threadpool(cell.tare)
+    return WeightResponse(weight_g=weight_g)
+
+
+@router.post(
+    "/balance/calibrate",
+    response_model=WeightResponse,
+    tags=["Balance"],
+    summary="Internal (isoCAL) calibration — empty pan; commissioning only",
+)
+async def calibrate(request: Request) -> WeightResponse:
+    cell = _cell(request)
+    async with request.app.state.lock:
+        weight_g = await run_in_threadpool(cell.calibrate)
     return WeightResponse(weight_g=weight_g)
 
 
@@ -220,40 +235,69 @@ async def cycle(request: Request, body: CycleRequest) -> CycleResponse:
     return CycleResponse(**result)
 
 
-# ── Stage ──────────────────────────────────────────────────────────────────
+# ── Gantry (XZ) — pump+gantry cells ──────────────────────────────────────────
 
 
 @router.post(
-    "/stage/home",
-    response_model=StageResponse,
-    tags=["Stage"],
+    "/gantry/home",
+    response_model=GantryResponse,
+    tags=["Gantry"],
     summary="Home the XZ gantry to the origin",
 )
-async def stage_home(request: Request) -> StageResponse:
+async def gantry_home(request: Request) -> GantryResponse:
     cell = _cell(request)
     async with request.app.state.lock:
-        x_mm, z_mm = await run_in_threadpool(cell.home_stage)
-    return StageResponse(x_mm=x_mm, z_mm=z_mm)
+        x_mm, z_mm = await run_in_threadpool(cell.home_gantry)
+    return GantryResponse(x_mm=x_mm, z_mm=z_mm)
 
 
 @router.post(
-    "/stage/move",
-    response_model=StageResponse,
-    tags=["Stage"],
+    "/gantry/move",
+    response_model=GantryResponse,
+    tags=["Gantry"],
     summary="Move the XZ gantry (up → X → down)",
 )
-async def stage_move(request: Request, body: StageMoveRequest) -> StageResponse:
+async def gantry_move(request: Request, body: GantryMoveRequest) -> GantryResponse:
     cell = _cell(request)
     async with request.app.state.lock:
         x_mm, z_mm = await run_in_threadpool(
-            lambda: cell.move_stage(
+            lambda: cell.move_gantry(
                 body.x_mm,
                 body.z_mm,
                 speed_pct=body.speed_pct,
                 accel_pct=body.accel_pct,
             )
         )
-    return StageResponse(x_mm=x_mm, z_mm=z_mm)
+    return GantryResponse(x_mm=x_mm, z_mm=z_mm)
+
+
+# ── Linear (Y) — balance+linear cells ─────────────────────────────────────────
+
+
+@router.post(
+    "/linear/home",
+    response_model=LinearResponse,
+    tags=["Linear"],
+    summary="Home the linear Y rail to the encoder origin (0 mm)",
+)
+async def linear_home(request: Request) -> LinearResponse:
+    cell = _cell(request)
+    async with request.app.state.lock:
+        y_mm = await run_in_threadpool(cell.home_linear)
+    return LinearResponse(y_mm=y_mm)
+
+
+@router.post(
+    "/linear/move",
+    response_model=LinearResponse,
+    tags=["Linear"],
+    summary="Move the linear Y rail to an absolute mm target",
+)
+async def linear_move(request: Request, body: LinearMoveRequest) -> LinearResponse:
+    cell = _cell(request)
+    async with request.app.state.lock:
+        y_mm = await run_in_threadpool(lambda: cell.move_linear(body.y_mm))
+    return LinearResponse(y_mm=y_mm)
 
 
 # ── Safety ─────────────────────────────────────────────────────────────────
