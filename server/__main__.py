@@ -16,9 +16,9 @@ from pathlib import Path
 
 import uvicorn
 
-from dispense_cell import Config, DispenseCell
+from cell.balance_linear_cell import BalanceLinearCell, BalanceLinearConfig
+from cell.pump_gantry_cell import Config, PumpGantryCell
 from server.app import create_app
-from weigh_cell import WeighCell, WeighConfig
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +41,7 @@ def _load(path: Path) -> tuple[Config, ServerConfig]:
         pump_init_force=int(pump.get("init_force", 2)),
         motor_serial_x=stage.get("serial_x", "NTAM63XD"),
         z_coord_invert=bool(stage.get("z_coord_invert", True)),
+        x_coord_invert=bool(stage.get("x_coord_invert", True)),
         home_dir_z=int(stage.get("home_dir_z", 0)),
         home_dir_x=int(stage.get("home_dir_x", 0)),
     )
@@ -52,13 +53,13 @@ def _load(path: Path) -> tuple[Config, ServerConfig]:
     return cell_cfg, server_cfg
 
 
-def _load_weigh(path: Path) -> tuple[WeighConfig, ServerConfig]:
+def _load_balance_linear(path: Path) -> tuple[BalanceLinearConfig, ServerConfig]:
     raw = tomllib.loads(path.read_text(encoding="utf-8"))
     linear = raw.get("linear", {})
     balance = raw.get("balance", {})
     server = raw.get("server", {})
-    weigh_cfg = WeighConfig(
-        linear_port=linear.get("port", "/dev/ttyUSB0"),
+    bl_cfg = BalanceLinearConfig(
+        linear_port=linear.get("port", "110A:1150"),
         scale_port=balance.get("port"),
         ambient=balance.get("ambient"),
     )
@@ -67,7 +68,16 @@ def _load_weigh(path: Path) -> tuple[WeighConfig, ServerConfig]:
         port=int(server.get("port", 17060)),  # cell4 default
         log_level=server.get("log_level", "info"),
     )
-    return weigh_cfg, server_cfg
+    return bl_cfg, server_cfg
+
+
+def _infer_cell(path: Path) -> str:
+    """Pick the cell shape from the config's tables so `--config` alone selects
+    it. A ``[linear]`` (or ``[balance]``) table → ``balance_linear`` (cell4);
+    otherwise ``pump_gantry`` (cell1–3). ``--cell`` overrides this."""
+    raw = tomllib.loads(path.read_text(encoding="utf-8"))
+    has_bl = "linear" in raw or "balance" in raw
+    return "balance_linear" if has_bl else "pump_gantry"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -83,49 +93,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--cell",
-        choices=("dispense", "weigh"),
-        default="dispense",
+        choices=("pump_gantry", "balance_linear"),
+        default=None,
         help=(
-            "Which cell shape this server serves: 'dispense' (cell1–3: pump + "
-            "XZ gantry, default) or 'weigh' (cell4: MINAS A6 linear rail + "
-            "balance)."
-        ),
-    )
-    parser.add_argument(
-        "--fake",
-        action="store_true",
-        help=(
-            "Run against the in-memory FakeCell instead of real hardware — "
-            "for web development and exercising the /v1 contract. Ignores "
-            "--config; serves on host/port from [server] if a config exists, "
-            "else 0.0.0.0:17054."
+            "Cell shape to serve. Omit to auto-detect from the config: a "
+            "[linear] table → 'balance_linear' (cell4), otherwise 'pump_gantry' "
+            "(cell1–3). Pass explicitly only to override the inference."
         ),
     )
     args = parser.parse_args(argv)
-
-    if args.fake:
-        from fake_cell import FakeCell
-
-        server_cfg = ServerConfig()
-        if args.config is not None and args.config.exists():
-            s = tomllib.loads(args.config.read_text(encoding="utf-8")).get(
-                "server", {}
-            )
-            server_cfg = ServerConfig(
-                host=s.get("host", "0.0.0.0"),
-                port=int(s.get("port", 17054)),
-                log_level=s.get("log_level", "info"),
-            )
-        app = create_app(cell_factory=FakeCell)
-        print(f"slh-server [FAKE] on {server_cfg.host}:{server_cfg.port}")
-        uvicorn.run(
-            app,
-            host=server_cfg.host,
-            port=server_cfg.port,
-            log_level=server_cfg.log_level,
-            timeout_keep_alive=120,
-        )
-        return 0
 
     if args.config is not None:
         cfg_path = args.config
@@ -137,12 +113,13 @@ def main(argv: list[str] | None = None) -> int:
     if not cfg_path.exists():
         parser.error(f"config file not found: {cfg_path}")
 
-    if args.cell == "weigh":
-        weigh_cfg, server_cfg = _load_weigh(cfg_path)
-        factory = lambda: WeighCell.open(weigh_cfg)  # noqa: E731
+    cell_kind = args.cell or _infer_cell(cfg_path)
+    if cell_kind == "balance_linear":
+        bl_cfg, server_cfg = _load_balance_linear(cfg_path)
+        factory = lambda: BalanceLinearCell.open(bl_cfg)  # noqa: E731
     else:
         cell_cfg, server_cfg = _load(cfg_path)
-        factory = lambda: DispenseCell.open(cell_cfg)  # noqa: E731
+        factory = lambda: PumpGantryCell.open(cell_cfg)  # noqa: E731
 
     app = create_app(cell_factory=factory)
     uvicorn.run(

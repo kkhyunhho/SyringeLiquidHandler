@@ -73,6 +73,9 @@ export function makeHttpClient(base = "") {
     status: () => get<Status>("/v1/status"),
 
     tare: () => post<{ weight_g: number }>("/v1/balance/tare"),
+    calibrate: () => post<{ weight_g: number }>("/v1/balance/calibrate"),
+    weight: () =>
+      get<{ weight_g: number; stable: boolean }>("/v1/balance/weight"),
     ambient: (level: string) =>
       post<{ level: string }>("/v1/balance/ambient", { level }),
 
@@ -93,14 +96,18 @@ export function makeHttpClient(base = "") {
         dispense_port,
       }),
 
-    stageHome: () => post<{ x_mm: number; z_mm: number }>("/v1/stage/home"),
-    stageMove: (x_mm: number, z_mm: number, speed_pct: number, accel_pct: number) =>
-      post<{ x_mm: number; z_mm: number }>("/v1/stage/move", {
+    gantryHome: () => post<{ x_mm: number; z_mm: number }>("/v1/gantry/home"),
+    gantryMove: (x_mm: number, z_mm: number, speed_pct: number, accel_pct: number) =>
+      post<{ x_mm: number; z_mm: number }>("/v1/gantry/move", {
         x_mm,
         z_mm,
         speed_pct,
         accel_pct,
       }),
+
+    linearHome: () => post<{ y_mm: number }>("/v1/linear/home"),
+    linearMove: (y_mm: number) =>
+      post<{ y_mm: number }>("/v1/linear/move", { y_mm }),
 
     stop: () => post<{ stopped: boolean }>("/v1/stop"),
   }

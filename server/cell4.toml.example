@@ -1,9 +1,10 @@
-# cell4 (weigh) config. Copy to cell4.toml (gitignored).
-#   python -m server --cell weigh --config server/cell4.toml          # real
-#   python -m server --cell weigh --config server/cell4.toml --fake   # dev
+# cell4 (balance + linear) config. Copy to cell4.toml (gitignored).
+#   python -m server --config server/cell4.toml          # real (cell auto-detected)
 
 [linear]
-port = "/dev/ttyUSB0"   # MINAS A6 over RS485 (TI USB3410)
+# MINAS A6 over RS485 via Moxa UPort 1150. "VID:PID" is resolved at runtime
+# (lmc.resolve_port) so it survives ttyUSBn renumbering; a /dev path also works.
+port = "110A:1150"
 
 [balance]
 # Omit `port` to auto-detect the Sartorius balance by vendor ID 0x24BC.

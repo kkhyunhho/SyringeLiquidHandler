@@ -1,24 +1,18 @@
 # Python dependencies for SyringeLiquidHandler. Requires Python >= 3.12.
 #   conda activate sdl && pip install -r requirements.txt
 #
-# Self-contained (hybrid): the three sibling drivers are pinned to a git
-# commit so a fresh env pulls them from GitHub (no local clones needed); the
-# MINAS A6 linear driver (`lmc`) is vendored under vendor/ (not pip-pinnable
-# upstream — flat module, no pyproject). Re-pin a driver by bumping its @sha.
+# Fully self-contained: ALL hardware drivers are vendored in-repo under
+# vendor/ (sy01b, entris_ii, mks_motor, lmc all as packages), so
+# a fresh `pip install -r requirements.txt` needs no GitHub access or sibling
+# clones. Only the drivers' runtime deps (pyserial, pyftdi) are pulled from
+# PyPI below. See
+# vendor/VENDORED.md for each package's upstream source + commit; update a
+# driver by re-copying its source into vendor/ and bumping VENDORED.md.
 
-# ── Hardware drivers (git-pinned) ──────────────────────────────────────────
-sy01b @ git+https://github.com/kkhyunhho/SyringePumpController.git@5ae0d56
-entris_ii @ git+https://github.com/kkhyunhho/PrecisionScaleController.git@ad85d6c
-mks_motor @ git+https://github.com/kkhyunhho/ESP32S3BOX3MotorController.git@c156a37
-# lmc (MINAS A6 linear) → vendored at vendor/linear_motor_controller.py.
-
-# ── Transports / libs the drivers + cell need ──────────────────────────────
+# ── Transports / libs the vendored drivers + cell need ─────────────────────
 pyserial>=3.5    # pump (sy01b), balance (entris_ii), linear (lmc) over serial
-pyftdi>=0.55     # XZ gantry (ESP32 mks_motor) over FTDI USB2CAN
-ftd2xx>=1.3.8    # legacy xz_stage.py (MKS standalone via D2XX); needs libftd2xx
-openpyxl>=3.1.5  # .xlsx result workbook (cv_mass_measurement / report)
+pyftdi>=0.55     # XZ gantry (mks_motor) over FTDI USB2CAN
 
 # ── L1 /v1 server (server/) ────────────────────────────────────────────────
 fastapi>=0.115        # /v1 app + pydantic schemas
 uvicorn>=0.30         # ASGI server (python -m server)
-httpx>=0.27           # required by fastapi.testclient (tests/server)

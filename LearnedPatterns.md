@@ -89,3 +89,35 @@ format below. Newest entries at the bottom.
   `Stat` is an instability problem, not a code or tare-tolerance one. Loosen
   ambient (`Esc K/L/M/N`) and steady the pan; raising `TARE_TOLERANCE_G`
   does nothing (it runs after the read).
+
+---
+
+## 4. PumpGantryCell X axis: `home_dir_x=0x00` without invert drives X into its home limit
+
+- **Problem**: First bench bring-up of the XZ gantry through `PumpGantryCell`.
+  Homing succeeded (Z re-squared from a racked state, all three motors
+  landed on IN_1). Z `move_to(100)` worked (Z_A/Z_B = 100.02 mm), but X
+  `move_to(100)` printed `[LIMIT] Motor stopped by limit switch` immediately
+  and X never left 0 mm.
+- **Cause**: `Config.home_dir_x` was copied from `bridge.py` (`0x00`), which
+  is a **jog-only** UI and never does absolute `move_to` from home. X's
+  encoder-positive direction points *into* its home limit, so with no
+  `coord_invert`, `move_to(+mm)` emits `+coord` and drives X straight back
+  into the IN_1 limit it's sitting on. Z only worked because it already had
+  `z_coord_invert=True` (its limit wires were swapped), which flips +mm to
+  `-coord` (away from home). The legacy `CVMeasure.py` sidestepped this
+  asymmetrically with `HOME_DIR_X=0x01` (home X at the opposite end, no
+  invert) — equivalent but inconsistent with Z.
+- **Fix**: Treat X exactly like Z — add `x_coord_invert: bool = True` to
+  `Config` and apply it in `open()` (`x.coord_invert = config.x_coord_invert`,
+  since `open_xz` only exposes the Z pair's invert). Both axes now home at
+  the `0x00` end and `move_to(+mm)` travels into the work via `-coord`.
+  Verified live: X `move_to(100)` → coord `0x-28000`, X = 100.02 mm; back to
+  0 stopped on the limit at 0.08 mm. No re-home needed — the encoder zero is
+  unchanged, only the coord sign flips.
+- **Rule**: `home_dir`/`coord_invert` are per-axis and must be validated with
+  an actual absolute `move_to` off the home limit, not assumed from the jog
+  bridge. A motor commanded toward the limit it already rests on stops
+  instantly at 0 — that's a direction-config bug, not a hardware fault.
+  Keep all gantry axes on one convention (home at `0x00` + `coord_invert`)
+  so +mm always means "into the working travel."

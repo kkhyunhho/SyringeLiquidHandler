@@ -93,8 +93,8 @@ const newCellState = (): CellState => ({
   live: {
     weightG: 0,
     path: 1,
-    aspPort: 1,
-    dispPort: 3,
+    aspPort: 1, // source = physical Port 1 (ESP default source position)
+    dispPort: 3, // sink = physical Port 3 (ESP default sink position)
     valveConnect: 1,
     plungerUL: 0,
     stageXmm: 0,
@@ -232,7 +232,12 @@ export default function App() {
     const [r] = await Promise.all([p, sleep(ms)])
     return r
   }
-  const asPort = (v: string): Port => (v === "3" ? 3 : 1)
+  // Status `valve` is the firmware position (1..4); map back to the physical
+  // port shown in the UI: firmware 2/4 = C↔3 = Port 3, else Port 1.
+  const asPort = (v: string): Port => (v === "2" || v === "4" ? 3 : 1)
+  // Physical port the operator picks → firmware command value the pump needs:
+  // Port 1 → 1 (I1R, C↔1), Port 3 → 2 (I2R, C↔3). I3R would be C↔1 again.
+  const valveFw = (physical: Port): number => (physical === 3 ? 2 : 1)
 
   // ── Live readout polling for every cell (skip a cell while it's busy) ──
   useEffect(() => {
@@ -309,6 +314,24 @@ export default function App() {
       patchLive(id, (l) => ({ ...l, weightG: r.weight_g }))
     })
 
+  // Internal (isoCAL) calibration — empty pan. Used at commissioning
+  // ("Setup all"); routine zeroing uses tareCell.
+  const calibrateCell = (id: string) =>
+    withBusy(id, ["balance"], async () => {
+      pushHist(id, "Calibrate (isoCAL)", { kind: "calibrate", cell: id })
+      const r = await clientFor(id).calibrate()
+      patchLive(id, (l) => ({ ...l, weightG: r.weight_g }))
+    })
+
+  // On-demand settled read through the balance filter (read_stable_weight).
+  const readWeightCell = (id: string) =>
+    withBusy(id, ["balance"], async () => {
+      const r = await clientFor(id).weight()
+      patchLive(id, (l) => ({ ...l, weightG: r.weight_g }))
+      pushHist(id, `Weight ${r.weight_g.toFixed(4)} g`)
+      toast.success(`${cellName(id)} — ${r.weight_g.toFixed(4)} g`)
+    })
+
   const setAmbientCell = (id: string, level: string) =>
     withBusy(id, ["balance"], async () => {
       await clientFor(id).ambient(level)
@@ -326,12 +349,12 @@ export default function App() {
       dispPort: op.disp,
       valveConnect: op.asp,
     }))
-    await withAnim(cl.valve(op.asp), VALVE_MS)
+    await withAnim(cl.valve(valveFw(op.asp)), VALVE_MS)
     setPlungerDurMs(ms)
     patchLive(id, (l) => ({ ...l, plungerUL: v }))
     await withAnim(cl.aspirate(v), ms)
     patchLive(id, (l) => ({ ...l, valveConnect: op.disp }))
-    await withAnim(cl.valve(op.disp), VALVE_MS)
+    await withAnim(cl.valve(valveFw(op.disp)), VALVE_MS)
     setPlungerDurMs(ms)
     patchLive(id, (l) => ({ ...l, plungerUL: 0 }))
     await withAnim(cl.dispense(0), ms)
@@ -340,7 +363,12 @@ export default function App() {
 
   const doPrime = async (id: string, op: Extract<Op, { kind: "prime" }>) => {
     const ms = plungerMs(SYRINGE_UL, op.pumpPct)
-    const done = clientFor(id).cycle(op.n, SYRINGE_UL, op.src, op.disp)
+    const done = clientFor(id).cycle(
+      op.n,
+      SYRINGE_UL,
+      valveFw(op.src),
+      valveFw(op.disp),
+    )
     for (let i = 1; i <= op.n; i++) {
       setPlungerDurMs(ms)
       patchLive(id, (l) => ({ ...l, plungerUL: SYRINGE_UL }))
@@ -376,6 +404,9 @@ export default function App() {
     const acc = Math.round((clamp(op.aPct, 0, 100) / 100) * 255)
     setStageEase(acc === 0 ? "linear" : "ease")
     const cur = cellsRef.current[id].live
+    // Fire the real move NOW so the hardware travels alongside the animation
+    // (not after it); await it once the animation finishes.
+    const real = clientFor(id).gantryMove(x, z, op.sPct, op.aPct)
     if (x === cur.stageXmm) {
       await stageSeg(z - cur.stageZmm, rpm, acc, () =>
         patchLive(id, (l) => ({ ...l, stageZmm: z })),
@@ -391,21 +422,33 @@ export default function App() {
         patchLive(id, (l) => ({ ...l, stageZmm: z })),
       )
     }
-    await clientFor(id).stageMove(x, z, op.sPct, op.aPct)
+    await real
     toast.success(`${cellName(id)} gantry → X ${x} / Z ${z} mm`)
   }
 
   const doHome = async (id: string) => {
     setStageEase("ease")
     const cur = cellsRef.current[id].live
-    await stageSeg(cur.stageZmm, HOME_RPM, HOME_ACC, () =>
-      patchLive(id, (l) => ({ ...l, stageZmm: 0 })),
-    )
-    if (cur.stageXmm !== 0)
+    const kind = CELLS.find((c) => c.id === id)?.kind
+    if (kind === "weigh") {
+      // Linear rail: single Y axis (mapped onto stageXmm), no gantry.
+      const real = clientFor(id).linearHome()
       await stageSeg(cur.stageXmm, HOME_RPM, HOME_ACC, () =>
         patchLive(id, (l) => ({ ...l, stageXmm: 0 })),
       )
-    await clientFor(id).stageHome()
+      await real
+    } else {
+      // Gantry homes Z first (paired), then X — animate + drive together.
+      const real = clientFor(id).gantryHome()
+      await stageSeg(cur.stageZmm, HOME_RPM, HOME_ACC, () =>
+        patchLive(id, (l) => ({ ...l, stageZmm: 0 })),
+      )
+      if (cur.stageXmm !== 0)
+        await stageSeg(cur.stageXmm, HOME_RPM, HOME_ACC, () =>
+          patchLive(id, (l) => ({ ...l, stageXmm: 0 })),
+        )
+      await real
+    }
     toast.success(`${cellName(id)} homed`)
   }
 
@@ -416,10 +459,11 @@ export default function App() {
     const rpm = (clamp(Number(inI.speedPct) || 0, 1, 100) / 100) * MAX_RPM
     const acc = Math.round((clamp(Number(inI.accelPct) || 0, 0, 100) / 100) * 255)
     setStageEase(acc === 0 ? "linear" : "ease")
+    const real = clientFor(id).linearMove(y)
     await stageSeg(y - cellsRef.current[id].live.stageXmm, rpm, acc, () =>
       patchLive(id, (l) => ({ ...l, stageXmm: y })),
     )
-    await clientFor(id).stageMove(y, 0, Number(inI.speedPct) || 20, acc)
+    await real
     toast.success(`${cellName(id)} linear Y → ${y} mm`)
   }
 
@@ -499,6 +543,8 @@ export default function App() {
   }
 
   const setPath = (p: 1 | 2) => patchLive(selId, (l) => ({ ...l, path: p }))
+  // C reaches only Port 1 or Port 3, and source ≠ sink, so they're the pair
+  // {1,3}: picking one sets the other to its complement.
   const setAsp = (p: Port) =>
     patchLive(selId, (l) => ({ ...l, aspPort: p, dispPort: p === 1 ? 3 : 1 }))
   const setDisp = (p: Port) =>
@@ -511,8 +557,11 @@ export default function App() {
   const setupAll = async () => {
     for (const c of CELLS) {
       await diagnoseCell(c.id)
+      // Commissioning: dispense cells initialize the pump; weigh cells run the
+      // internal isoCAL calibration (empty pan) — NOT a plain tare. Routine
+      // zeroing later uses the Tare button (tareCell).
       if (c.kind === "dispense") await initializeCell(c.id)
-      else await tareCell(c.id)
+      else await calibrateCell(c.id)
     }
     toast.success("Phase setup complete")
   }
@@ -534,6 +583,7 @@ export default function App() {
     if (a.kind === "diagnose") await diagnoseCell(a.cell)
     else if (a.kind === "initialize") await initializeCell(a.cell)
     else if (a.kind === "tare") await tareCell(a.cell)
+    else if (a.kind === "calibrate") await calibrateCell(a.cell)
     else if (a.kind === "ambient") await setAmbientCell(a.cell, a.level)
     else if (a.kind === "dispense")
       await withBusy(a.cell, ["pump"], () => doActivation(a.cell, a.op))
@@ -985,7 +1035,7 @@ export default function App() {
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="flex flex-col gap-1">
-                      <Label>Aspirate port</Label>
+                      <Label>Aspirate port (source)</Label>
                       <div className="flex gap-2">
                         {[1, 3].map((p) => (
                           <Button
@@ -1001,7 +1051,7 @@ export default function App() {
                       </div>
                     </div>
                     <div className="flex flex-col gap-1">
-                      <Label>Dispense port</Label>
+                      <Label>Dispense port (sink)</Label>
                       <div className="flex gap-2">
                         {[1, 3].map((p) => (
                           <Button
@@ -1145,9 +1195,30 @@ export default function App() {
 
                 <TabsContent value="balance" className="flex flex-col gap-3 pt-3">
                   <Stat label="weight" value={`${sc.live.weightG.toFixed(4)} g`} />
-                  <Button onClick={() => tareCell(selId)} disabled={!ready}>
-                    Tare
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button
+                      className="flex-1"
+                      onClick={() => readWeightCell(selId)}
+                      disabled={!ready || sc.busy.balance}
+                    >
+                      <Scale className="size-4" /> Read weight
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => tareCell(selId)}
+                      disabled={!ready}
+                    >
+                      Tare
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => calibrateCell(selId)}
+                      disabled={!ready || sc.busy.balance}
+                      title="Internal isoCAL calibration — pan must be empty"
+                    >
+                      Calibrate
+                    </Button>
+                  </div>
                   <div className="flex flex-col gap-1">
                     <Label>Ambient filter</Label>
                     <Select
@@ -1180,30 +1251,6 @@ export default function App() {
                   <Separator />
                   <div className="flex items-end gap-2">
                     <div className="flex flex-col gap-1">
-                      <Label htmlFor="lspd" className="text-xs">
-                        Speed (%) · max {MAX_MM_S.toFixed(0)} mm/s
-                      </Label>
-                      <Input
-                        id="lspd"
-                        value={inp.speedPct}
-                        onChange={(e) => setInput("speedPct", e.target.value)}
-                        className="w-24"
-                      />
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <Label htmlFor="lacc" className="text-xs">
-                        Accel (%) · 0 = instant
-                      </Label>
-                      <Input
-                        id="lacc"
-                        value={inp.accelPct}
-                        onChange={(e) => setInput("accelPct", e.target.value)}
-                        className="w-24"
-                      />
-                    </div>
-                  </div>
-                  <div className="flex items-end gap-2">
-                    <div className="flex flex-col gap-1">
                       <Label htmlFor="y" className="text-xs">
                         Y (mm) · 0–{X_MAX_MM}
                       </Label>
@@ -1219,7 +1266,9 @@ export default function App() {
                     </Button>
                   </div>
                   <span className="text-xs text-muted-foreground">
-                    Moves the balance under a cell to weigh its dispense.
+                    Moves the balance under a cell to weigh its dispense. The
+                    MINAS driver owns the speed profile (precise soft closed
+                    loop, ±0.1 mm) — no per-move speed/accel on this axis.
                   </span>
                 </TabsContent>
               </Tabs>
